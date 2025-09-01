@@ -5,24 +5,26 @@ import type { Card } from "../cards/Card";
 type Props = {
   card: Card;
   onPlay?: (c: Card) => void;
-  size?: "sm" | "md" | "lg";   // 👈 new
+  size?: "sm" | "md" | "lg";
 };
 
 function filenameFor(card: Card): string {
   if (card.kind === "number") return `${card.color}_${card.value}.png`;
-  if (card.kind === "action") return `${card.color}_${card.action}.png`;
-  return `${card.action}.png`; // wild / wildDraw4
+  if (card.kind === "action") return `${card.color}_${card.action}.png`; // skip|reverse|draw2
+  return card.action === "wildDraw4" ? "wildDraw4.png" : "wild.png";
 }
 
 function labelFor(card: Card) {
   if (card.kind === "number") return `${card.color} ${card.value}`;
   if (card.kind === "action") return `${card.color} ${card.action}`;
-  return card.action;
+  return card.action === "wildDraw4" ? "+4" : "wild";
 }
 
 export function CardView({ card, onPlay, size = "md" }: Props) {
   const [imgError, setImgError] = useState(false);
-  const url = `/cards/${filenameFor(card)}`;
+
+  // ✅ Prefix with Vite base so it works at /UNO-WEB3/ and in dev
+  const url = `${import.meta.env.BASE_URL}cards/${filenameFor(card)}`;
 
   const dims =
     size === "lg"
