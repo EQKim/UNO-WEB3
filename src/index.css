@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* optional: nicer default font */
+:root { font-family: Inter, ui-sans-serif, system-ui; }
