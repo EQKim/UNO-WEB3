@@ -1,11 +1,11 @@
 import {
-  writeBatch, doc, getDoc, getDocs, collection, serverTimestamp,
-  onSnapshot
+  runTransaction, writeBatch, doc, getDocs, collection,
+  serverTimestamp, onSnapshot
 } from "firebase/firestore";
-
 import { auth, db, ensureAnonAuth } from "../firebase";
 import type { Card } from "../cards/Card";
 import { buildDeck, shuffle } from "../cards/Deck";
+import { matches } from "../cards/Rules";
 
 /** Listen to room core state + your hand + players list */
 export function subscribeOnlineGame(
@@ -44,7 +44,7 @@ export async function startGameClient(roomId: string) {
 
   // find first non-wild top card
   let top = deck.pop()!;
-  // @ts-ignore (same shape as your Card type)
+  // @ts-ignore
   while (top.kind === "wild") { deck.unshift(top); top = deck.pop()!; }
 
   const batch = writeBatch(db);
@@ -69,65 +69,86 @@ export async function startGameClient(roomId: string) {
   await batch.commit();
 }
 
-/** Play a card (MVP: no server validation yet) */
+/** Play a card (turn enforced; simple advance; no action effects yet) */
 export async function playCardOnline(roomId: string, card: Card) {
   await ensureAnonAuth();
   const uid = auth.currentUser!.uid;
-
-  // Read your current hand
-  // (We’re using set with array filter to keep it simple client-side.)
-  const handRef = doc(db, "rooms", roomId, "hands", uid);
   const roomRef = doc(db, "rooms", roomId);
+  const myHandRef = doc(db, "rooms", roomId, "hands", uid);
 
-  // Pull current state
-  const [handSnap, roomSnap] = await Promise.all([
-  getDoc(handRef),
-  getDoc(roomRef)
-]);
+  await runTransaction(db, async (tx) => {
+    const roomSnap = await tx.get(roomRef);
+    const handSnap = await tx.get(myHandRef);
+    if (!roomSnap.exists()) throw new Error("Room missing");
+    const room = roomSnap.data() as any;
+    const myHand = (handSnap.data()?.cards ?? []) as Card[];
 
+    if (room.status !== "playing") throw new Error("Game not started");
+    if (room.currentTurn !== uid) throw new Error("Not your turn");
+    if (!matches(room.topCard as Card, card)) throw new Error("Illegal play");
 
-  const myCards = (handSnap?.data()?.cards ?? []) as Card[];
-  const idx = myCards.findIndex(c =>
-    JSON.stringify(c) === JSON.stringify(card)
-  );
-  if (idx < 0) throw new Error("Card not in hand");
+    // remove from hand
+    const idx = myHand.findIndex(c => JSON.stringify(c) === JSON.stringify(card));
+    if (idx < 0) throw new Error("Card not in hand");
+    myHand.splice(idx, 1);
 
-  myCards.splice(idx, 1);
+    const discard: Card[] = [ ...(room.discardPile ?? []), card ];
 
-  const discard = (roomSnap?.data()?.discardPile ?? []) as Card[];
-  discard.push(card);
+    // next player (clockwise; 2+ players assumed)
+    const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
+    const ids = playersSnap.docs.map(d => d.id);
 
-  const batch = writeBatch(db);
-  batch.set(handRef, { cards: myCards }, { merge: true });
-  batch.set(doc(db, "rooms", roomId, "players", uid), { handCount: myCards.length }, { merge: true });
-  batch.set(roomRef, { topCard: card, discardPile: discard, updatedAt: serverTimestamp() }, { merge: true });
-  await batch.commit();
+    const dir = room.direction ?? 1;
+    const curIdx = ids.indexOf(uid);
+    const nextUid = ids[(curIdx + dir + ids.length) % ids.length];
+
+    tx.set(myHandRef, { cards: myHand }, { merge: true });
+    tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
+    tx.set(roomRef, {
+      topCard: card,
+      discardPile: discard,
+      currentTurn: nextUid,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  });
 }
 
-/** Draw one (MVP) */
+/** Draw one (turn enforced; drawing ends your turn) */
 export async function drawOneOnline(roomId: string) {
   await ensureAnonAuth();
   const uid = auth.currentUser!.uid;
-
-  const handRef = doc(db, "rooms", roomId, "hands", uid);
   const roomRef = doc(db, "rooms", roomId);
+  const myHandRef = doc(db, "rooms", roomId, "hands", uid);
 
-const [handSnap, roomSnap] = await Promise.all([
-  getDoc(handRef),
-  getDoc(roomRef)
-]);
+  await runTransaction(db, async (tx) => {
+    const roomSnap = await tx.get(roomRef);
+    const handSnap = await tx.get(myHandRef);
+    if (!roomSnap.exists()) throw new Error("Room missing");
+    const room = roomSnap.data() as any;
+    const myHand = (handSnap.data()?.cards ?? []) as Card[];
 
+    if (room.currentTurn !== uid) throw new Error("Not your turn");
 
-  const myCards = (handSnap?.data()?.cards ?? []) as Card[];
-  const drawPile = (roomSnap?.data()?.drawPile ?? []) as Card[];
+    const drawPile: Card[] = [ ...(room.drawPile ?? []) ];
+    if (!drawPile.length) throw new Error("No cards to draw");
 
-  if (!drawPile.length) throw new Error("No cards to draw");
+    const drawn = drawPile.pop()!;
+    myHand.push(drawn);
 
-  const card = drawPile.pop();
+    // end turn after draw (simple rule)
+    const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
+    const ids = playersSnap.docs.map(d => d.id);
 
-  const batch = writeBatch(db);
-  batch.set(handRef, { cards: [...myCards, card] }, { merge: true });
-  batch.set(doc(db, "rooms", roomId, "players", uid), { handCount: myCards.length + 1 }, { merge: true });
-  batch.set(roomRef, { drawPile, updatedAt: serverTimestamp() }, { merge: true });
-  await batch.commit();
+    const dir = room.direction ?? 1;
+    const curIdx = ids.indexOf(uid);
+    const nextUid = ids[(curIdx + dir + ids.length) % ids.length];
+
+    tx.set(myHandRef, { cards: myHand }, { merge: true });
+    tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
+    tx.set(roomRef, {
+      drawPile,
+      currentTurn: nextUid,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  });
 }
