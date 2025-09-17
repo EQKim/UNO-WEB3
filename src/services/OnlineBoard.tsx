@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Card } from "../cards/Card";
 import { CardView } from "../ui/CardView";
-import { subscribeOnlineGame, startGameClient, playCardOnline, drawOneOnline } from "../services/OnlineGame";
+import {
+  subscribeOnlineGame,
+  startGameClient,
+  playCardOnline,
+  drawOneOnline
+} from "../services/OnlineGame";
 import { matches } from "../cards/Rules";
 import { auth } from "../firebase";
 
@@ -56,7 +61,14 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
       {room.status !== "playing" && (
         <div className="mt-2">
           {isHost
-            ? <button className="px-4 py-2 rounded bg-emerald-600 text-white" onClick={() => startGameClient(roomId)}>Start game</button>
+            ? (
+              <button
+                className="px-4 py-2 rounded bg-emerald-600 text-white"
+                onClick={() => startGameClient(roomId)}
+              >
+                Start game
+              </button>
+            )
             : <div>Waiting for host to start…</div>}
         </div>
       )}
@@ -71,7 +83,8 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
           <div className="mt-3 flex gap-2">
             <button
               onClick={async () => {
-                try { await drawOneOnline(roomId); } catch (e:any) { alert(e.message ?? String(e)); }
+                try { await drawOneOnline(roomId); }
+                catch (e: any) { alert(e.message ?? String(e)); }
               }}
               disabled={!isMyTurn}
               className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50"
@@ -85,22 +98,32 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
             <h3 className="font-semibold mb-1">Your hand ({myHand.length})</h3>
             <div className="flex flex-wrap gap-1.5">
               {myHand.map((c, i) => {
-                const playable = !!top && matches(top, c) && isMyTurn;
+                // purely for styling feedback
+                const looksPlayable = !!top && matches(top, c);
                 return (
                   <div
                     key={i}
                     onClick={async () => {
-                      if (!playable) return;
-                      // quick wild color prompt
-                      const card = { ...c } as any;
+                      if (!isMyTurn) return;
+
+                      // quick wild picker (backend also checks)
+                      const card: any = { ...c };
                       if (card.kind === "wild" && !card.chosenColor) {
                         const pick = prompt("Pick color: red / yellow / green / blue")?.toLowerCase();
                         if (!pick || !["red","yellow","green","blue"].includes(pick)) return;
                         card.chosenColor = pick;
                       }
-                      try { await playCardOnline(roomId, card); } catch (e:any) { alert(e.message ?? String(e)); }
+
+                      try {
+                        await playCardOnline(roomId, card); // server enforces legality & turn
+                      } catch (e: any) {
+                        alert(e.message ?? String(e));
+                      }
                     }}
-                    className={playable ? "cursor-pointer" : "opacity-60"}
+                    className={[
+                      isMyTurn ? "cursor-pointer" : "opacity-60",
+                      looksPlayable ? "" : "opacity-60"
+                    ].join(" ")}
                   >
                     <CardView card={c} size="md" />
                   </div>

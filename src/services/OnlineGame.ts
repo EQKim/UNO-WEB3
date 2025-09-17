@@ -7,6 +7,22 @@ import type { Card } from "../cards/Card";
 import { buildDeck, shuffle } from "../cards/Deck";
 import { matches } from "../cards/Rules";
 
+/** Safe card equality that survives Firestore serialization. */
+function equalCard(a: Card, b: Card): boolean {
+  if (a.kind !== b.kind) return false;
+
+  if (a.kind === "number" && b.kind === "number") {
+    return a.color === b.color && a.value === b.value;
+  }
+  if (a.kind === "action" && b.kind === "action") {
+    return a.color === b.color && a.action === b.action;
+  }
+  // wild
+  const ac = (a as any).chosenColor ?? null;
+  const bc = (b as any).chosenColor ?? null;
+  return (a as any).action === (b as any).action && ac === bc;
+}
+
 /** Listen to room core state + your hand + players list */
 export function subscribeOnlineGame(
   roomId: string,
@@ -87,8 +103,8 @@ export async function playCardOnline(roomId: string, card: Card) {
     if (room.currentTurn !== uid) throw new Error("Not your turn");
     if (!matches(room.topCard as Card, card)) throw new Error("Illegal play");
 
-    // remove from hand
-    const idx = myHand.findIndex(c => JSON.stringify(c) === JSON.stringify(card));
+    // remove from hand (robust comparison)
+    const idx = myHand.findIndex(c => equalCard(c, card));
     if (idx < 0) throw new Error("Card not in hand");
     myHand.splice(idx, 1);
 
