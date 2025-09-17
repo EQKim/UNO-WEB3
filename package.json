@@ -3,16 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://EQKim.github.io/UNO-WEB3/", 
+  "homepage": "https://EQKim.github.io/UNO-WEB3/",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "predeploy": "npm run build", 
+    "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "firebase": "^12.2.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

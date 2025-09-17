@@ -1,5 +1,6 @@
 // src/ui/GameBoard.tsx
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ensureAnonAuth } from "../firebase"; 
 import type { Card } from "../cards/Card"
 import { HandView } from "./HandView"
 import type { Player } from "../game/Player"
@@ -78,6 +79,12 @@ function applyEffectsAfterPlay(
 
 /* -------------------- component -------------------- */
 export default function GameBoard() {
+
+ // Sign in to Firebase once on mount
+  useEffect(() => {
+    ensureAnonAuth().then(() => console.log("Firebase anon auth OK"));
+  }, []);
+
   const [round, setRound] = useState(initRound)
   const [winner, setWinner] = useState<string | null>(null)
 
