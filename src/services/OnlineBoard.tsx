@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Card } from "../cards/Card";
 import { CardView } from "../ui/CardView";
-import { subscribeOnlineGame, startGameClient, playCardOnline, drawOneOnline } from "../services/onlineGame";
+import { subscribeOnlineGame, startGameClient, playCardOnline, drawOneOnline } from "../services/OnlineGame";
 import { matches } from "../cards/Rules";
 
 type Props = { roomId: string; isHost: boolean };
