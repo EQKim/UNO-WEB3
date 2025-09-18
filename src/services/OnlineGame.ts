@@ -7,6 +7,25 @@ import type { Card } from "../cards/Card";
 import { buildDeck, shuffle } from "../cards/Deck";
 import { matches } from "../cards/Rules";
 
+/* -------------------- helpers -------------------- */
+
+
+function isActionSkip(card: Card) {
+  return card.kind === "action" && card.action === "skip";
+}
+function isActionReverse(card: Card) {
+  return card.kind === "action" && card.action === "reverse";
+}
+function isActionDraw2(card: Card) {
+  // typed name, but also allow drawAmount = 2 for safety
+  return card.kind === "action" && (card.action === "draw2" || (card as any).drawAmount === 2);
+}
+function isWildDraw4(card: Card) {
+  // **THIS is the key fix**: your +4 is "wildDraw4" on a wild card
+  return card.kind === "wild" && (card.action === "wildDraw4" || (card as any).drawAmount === 4);
+}
+
+
 /** Safe card equality that survives Firestore serialization. */
 function equalCard(a: Card, b: Card): boolean {
   if (a.kind !== b.kind) return false;
@@ -14,15 +33,21 @@ function equalCard(a: Card, b: Card): boolean {
   if (a.kind === "number" && b.kind === "number") {
     return a.color === b.color && a.value === b.value;
   }
+
   if (a.kind === "action" && b.kind === "action") {
     return a.color === b.color && a.action === b.action;
   }
-  // wild: ignore chosenColor when comparing (hand copy usually has none)
-  // @ts-expect-error 'action' exists on wild
-  return a.action === (b as any).action;
+
+  // wild vs wild: ignore chosenColor, compare action exactly ("wild" vs "wildDraw4")
+  if (a.kind === "wild" && b.kind === "wild") {
+    return a.action === b.action;
+  }
+
+  return false;
 }
 
-/** Listen to room core state + your hand + players list */
+
+/* -------------------- subscriptions -------------------- */
 export function subscribeOnlineGame(
   roomId: string,
   handlers: {
@@ -43,7 +68,8 @@ export function subscribeOnlineGame(
   return () => { unsubRoom(); unsubPlayers(); unsubHand(); };
 }
 
-/** TEMP: Start game on client (MVP). Later move to Cloud Functions */
+/* -------------------- start game -------------------- */
+
 export async function startGameClient(roomId: string) {
   await ensureAnonAuth();
   const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
@@ -91,15 +117,14 @@ export async function startGameClient(roomId: string) {
   await batch.commit();
 }
 
-/** Helpers */
+/* -------------------- utilities -------------------- */
+
 function nextIndex(ids: string[], idx: number, dir: number) {
   return (idx + dir + ids.length) % ids.length;
 }
 
-/** Play a card with:
- * - Stacking +2/+4: only same type stacks
- * - Number chaining: same number (any color) lets you keep playing; player may call endTurnOnline() to pass
- */
+/* -------------------- play card (stacking +2/+4 & number-chaining) -------------------- */
+
 export async function playCardOnline(roomId: string, card: Card) {
   await ensureAnonAuth();
   const uid = auth.currentUser!.uid;
@@ -127,33 +152,31 @@ export async function playCardOnline(roomId: string, card: Card) {
     const drawPile: Card[] = [ ...(room.drawPile ?? []) ];
     const discard: Card[] = [ ...(room.discardPile ?? []) ];
 
-    // ---------- LEGALITY CHECK ----------
+    // Flow state
     const pendingDraw: number = room.pendingDraw ?? 0;
     const pendingType: "draw2" | "draw4" | null = room.pendingType ?? null;
     const chainValue: number | null = room.chainValue ?? null;
     const chainPlayer: string | null = room.chainPlayer ?? null;
 
+    // ---------- LEGALITY ----------
     if (pendingDraw > 0) {
-      // Only allowed to play same-type stack
-      const isDraw2 = card.kind === "action" && card.action === "draw2";
-      // @ts-ignore
-      const isDraw4 = card.kind === "wild" && card.action === "draw4";
-      if (!((pendingType === "draw2" && isDraw2) || (pendingType === "draw4" && isDraw4))) {
+      const ok =
+        (pendingType === "draw2" && isActionDraw2(card)) ||
+        (pendingType === "draw4" && isWildDraw4(card));
+      if (!ok) {
         throw new Error(`You must draw ${pendingDraw} or stack another ${pendingType === "draw2" ? "+2" : "+4"}`);
       }
-      // color match is ignored for stacking +2; +4 is wild anyway
     } else if (chainValue !== null) {
-      // Only the chaining player can act, and only with the same number
       if (chainPlayer !== uid) throw new Error("Other player must end their chain");
       if (!(card.kind === "number" && card.value === chainValue)) {
         throw new Error(`You can only play another ${chainValue} or end your turn`);
       }
     } else {
-      // Normal legality
+      // Normal legality by rules (color/number/wild)
       if (!matches(room.topCard as Card, card)) throw new Error("Illegal play");
     }
 
-    // ---------- APPLY: remove from hand ----------
+    // ---------- REMOVE FROM HAND ----------
     const idx = myHand.findIndex(c => equalCard(c, card));
     if (idx < 0) throw new Error("Card not in hand");
     myHand.splice(idx, 1);
@@ -179,7 +202,7 @@ export async function playCardOnline(roomId: string, card: Card) {
       return;
     }
 
-    // ---------- EFFECTS & TURN LOGIC ----------
+    // ---------- EFFECTS & TURN ----------
     let turnIdx = nIdx; // default: pass to next
     let nextPendingDraw = pendingDraw;
     let nextPendingType: "draw2" | "draw4" | null = pendingType;
@@ -187,55 +210,44 @@ export async function playCardOnline(roomId: string, card: Card) {
     let nextChainPlayer: string | null = null;
 
     if (pendingDraw > 0) {
-      // We already validated it's a same-type stack
+      // same-type stack (already validated)
       if (pendingType === "draw2") nextPendingDraw += 2;
       if (pendingType === "draw4") nextPendingDraw += 4;
-      // After stacking, pass burden to the next player
-      turnIdx = nIdx;
-      // keep same pendingType
+      turnIdx = nIdx; // victim’s turn to respond
     } else if (chainValue !== null) {
-      // Continue number chain; keep turn if you still have same number
+      // number-chaining
       const stillHasSame = myHand.some(c => c.kind === "number" && c.value === chainValue);
       if (stillHasSame) {
-        // player keeps turn
+        // keep chaining
         turnIdx = curIdx;
         nextChainValue = chainValue;
         nextChainPlayer = uid;
       } else {
-        // pass turn
         turnIdx = nIdx;
       }
     } else {
-      // No pending, no chain: resolve based on card
-      if (card.kind === "action") {
-        if (card.action === "skip") {
-          turnIdx = nextIndex(ids, nIdx, dir); // skip one
-        } else if (card.action === "reverse") {
-          dir = -dir;
-          // with 2 players, reverse behaves like skip
-          if (ids.length === 2) {
-            turnIdx = nextIndex(ids, nIdx, dir);
-          } else {
-            // after reversing, the next player is the previous player in the new direction
-            turnIdx = nextIndex(ids, curIdx, dir);
-          }
-        } else if (card.action === "draw2") {
-          nextPendingDraw = 2;
-          nextPendingType = "draw2";
-          turnIdx = nIdx; // victim's turn to respond
-        }
+      // fresh play
+      if (isActionSkip(card)) {
+        turnIdx = nextIndex(ids, nIdx, dir); // skip 1
+      } else if (isActionReverse(card)) {
+        dir = -dir;
+        // with 2 players reverse ≈ skip
+        turnIdx = (ids.length === 2)
+          ? nextIndex(ids, nIdx, dir)
+          : nextIndex(ids, curIdx, dir);
+      } else if (isActionDraw2(card)) {
+        nextPendingDraw = 2;
+        nextPendingType = "draw2";
+        turnIdx = nIdx; // victim responds (stack or draw)
+      } else if (isWildDraw4(card)) {
+        nextPendingDraw = 4;
+        nextPendingType = "draw4";
+        turnIdx = nIdx; // victim responds (stack or draw)
       } else if (card.kind === "wild") {
-        // @ts-ignore
-        if (card.action === "draw4") {
-          nextPendingDraw = 4;
-          nextPendingType = "draw4";
-          turnIdx = nIdx; // victim's turn to respond
-        } else {
-          // plain wild color change: normal advance
-          turnIdx = nIdx;
-        }
+        // plain wild color change: normal advance
+        turnIdx = nIdx;
       } else if (card.kind === "number") {
-        // Offer number-chaining: keep turn if you still have same number
+        // number-chaining (same value, any color)
         const val = card.value;
         const stillHasSame = myHand.some(c => c.kind === "number" && c.value === val);
         if (stillHasSame) {
@@ -269,6 +281,8 @@ export async function playCardOnline(roomId: string, card: Card) {
   });
 }
 
+/* -------------------- draw logic -------------------- */
+
 /** Draw action:
  * - If there's a pending stack against you, draw ALL pending and end turn.
  * - Otherwise draw ONE and end turn.
@@ -300,7 +314,7 @@ export async function drawOneOnline(roomId: string) {
     const pendingDraw: number = room.pendingDraw ?? 0;
 
     if (pendingDraw > 0) {
-      // Draw ALL pending, clear, and pass
+      // Draw ALL pending, clear, and pass (this is the "skip")
       for (let i = 0; i < pendingDraw; i++) {
         if (!drawPile.length) throw new Error("No cards to draw"); // MVP: no reshuffle
         myHand.push(drawPile.pop()!);
@@ -322,8 +336,7 @@ export async function drawOneOnline(roomId: string) {
 
     // Normal draw ONE, end turn
     if (!drawPile.length) throw new Error("No cards to draw");
-    const drawn = drawPile.pop()!;
-    myHand.push(drawn);
+    myHand.push(drawPile.pop()!);
 
     tx.set(myHandRef, { cards: myHand }, { merge: true });
     tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
@@ -336,6 +349,8 @@ export async function drawOneOnline(roomId: string) {
     }, { merge: true });
   });
 }
+
+/* -------------------- end chained turn -------------------- */
 
 /** End the current player's voluntary number-chain turn (no draw). */
 export async function endTurnOnline(roomId: string) {

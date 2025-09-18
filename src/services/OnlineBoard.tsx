@@ -36,6 +36,11 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
   const computedIsHost =
     isHost || room?.hostUid === myUid || (players.length > 0 && players[0]?.id === myUid);
 
+  // ----- NEW: pending stack / chaining awareness -----
+  const pendingType = (room?.pendingType ?? null) as ("draw2" | "draw4" | null);
+  const chainingActive = room?.chainPlayer === myUid && room?.chainValue !== null;
+
+  // If NO pending stack, standard playable = matches(top, c)
   const youHavePlayable = useMemo(
     () => !!top && myHand.some(c => matches(top, c)),
     [myHand, top]
@@ -65,8 +70,25 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
     }
   };
 
-  const chainingActive = room?.chainPlayer === myUid && room?.chainValue !== null;
-  const pendingDrawInfo = room?.pendingDraw ? { n: room.pendingDraw as number, type: room.pendingType as "draw2" | "draw4" | null } : null;
+  // ----- NEW: helpers that enforce special flows on the client -----
+
+  // During a pending stack, ONLY allow stacking the same type.
+  const canStackSame = (c: Card) => {
+    if (pendingType === "draw2") {
+      return c.kind === "action" && c.action === "draw2";
+    }
+    if (pendingType === "draw4") {
+      return c.kind === "wild" && c.action === "wildDraw4";
+    }
+    return false;
+  };
+
+  // During number-chaining, allow same-number plays regardless of matches(top, c).
+  const canChainNumber = (c: Card) =>
+    chainingActive && c.kind === "number" && c.value === room?.chainValue;
+
+  const pendingDrawInfo =
+    room?.pendingDraw ? { n: room.pendingDraw as number, type: room.pendingType as "draw2" | "draw4" | null } : null;
 
   return (
     <div className="p-6 space-y-3">
@@ -193,7 +215,13 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
             <div className="flex flex-wrap gap-1.5">
               {myHand.map((c, i) => {
                 const looksPlayable = !!top && matches(top, c);
-                const canClick = isMyTurn && looksPlayable;
+
+                // ⬇️ NEW: compute clickability with stacking & chaining rules
+                const canClick = isMyTurn && (
+                  pendingType
+                    ? canStackSame(c)                     // must stack same type during a pending stack
+                    : (looksPlayable || canChainNumber(c)) // otherwise normal match OR same-number chain
+                );
 
                 return (
                   <button
@@ -216,9 +244,17 @@ export default function OnlineBoard({ roomId, isHost }: Props) {
                     disabled={!canClick}
                     className={[
                       "relative inline-block p-0 border-0 bg-transparent",
-                      canClick ? "cursor-pointer" : "opacity-60 cursor-default"
+                      canClick ? "cursor-pointer" : "opacity-60 cursor-not-allowed"
                     ].join(" ")}
                     aria-disabled={!canClick}
+                    title={
+                      !isMyTurn ? "Not your turn"
+                        : pendingType
+                          ? (pendingType === "draw4"
+                              ? "Only +4 can be played (or Draw)"
+                              : "Only +2 can be played (or Draw)")
+                          : undefined
+                    }
                   >
                     <CardView card={c} size="md" />
                     <span className="absolute inset-0" />
