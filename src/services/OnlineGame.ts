@@ -17,10 +17,9 @@ function equalCard(a: Card, b: Card): boolean {
   if (a.kind === "action" && b.kind === "action") {
     return a.color === b.color && a.action === b.action;
   }
-  // wild
-  const ac = (a as any).chosenColor ?? null;
-  const bc = (b as any).chosenColor ?? null;
-  return (a as any).action === (b as any).action && ac === bc;
+  // wild: ignore chosenColor when comparing (hand copy usually has none)
+  // @ts-expect-error 'action' exists on wild
+  return a.action === (b as any).action;
 }
 
 /** Listen to room core state + your hand + players list */
@@ -65,7 +64,7 @@ export async function startGameClient(roomId: string) {
 
   const batch = writeBatch(db);
 
-  // room core state
+  // room core state (clear any winner/flow fields)
   batch.set(doc(db, "rooms", roomId), {
     status: "playing",
     currentTurn: playerIds[0],
@@ -73,6 +72,13 @@ export async function startGameClient(roomId: string) {
     topCard: top,
     drawPile: deck,            // simple for MVP
     discardPile: [top],
+    // stacking & chaining state
+    pendingDraw: 0,            // total to draw for the current victim
+    pendingType: null,         // "draw2" | "draw4" | null
+    chainValue: null,          // number value the current player may continue to play
+    chainPlayer: null,         // uid who is chaining number cards
+    winnerUid: null,
+    finishedAt: null,
     updatedAt: serverTimestamp()
   }, { merge: true });
 
@@ -85,7 +91,15 @@ export async function startGameClient(roomId: string) {
   await batch.commit();
 }
 
-/** Play a card (turn enforced; simple advance; no action effects yet) */
+/** Helpers */
+function nextIndex(ids: string[], idx: number, dir: number) {
+  return (idx + dir + ids.length) % ids.length;
+}
+
+/** Play a card with:
+ * - Stacking +2/+4: only same type stacks
+ * - Number chaining: same number (any color) lets you keep playing; player may call endTurnOnline() to pass
+ */
 export async function playCardOnline(roomId: string, card: Card) {
   await ensureAnonAuth();
   const uid = auth.currentUser!.uid;
@@ -101,35 +115,164 @@ export async function playCardOnline(roomId: string, card: Card) {
 
     if (room.status !== "playing") throw new Error("Game not started");
     if (room.currentTurn !== uid) throw new Error("Not your turn");
-    if (!matches(room.topCard as Card, card)) throw new Error("Illegal play");
 
-    // remove from hand (robust comparison)
+    // Players order and direction
+    const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
+    const ids = playersSnap.docs.map(d => d.id);
+    let dir: number = room.direction ?? 1;
+    const curIdx = ids.indexOf(uid);
+    const nIdx = nextIndex(ids, curIdx, dir);
+
+    // Piles
+    const drawPile: Card[] = [ ...(room.drawPile ?? []) ];
+    const discard: Card[] = [ ...(room.discardPile ?? []) ];
+
+    // ---------- LEGALITY CHECK ----------
+    const pendingDraw: number = room.pendingDraw ?? 0;
+    const pendingType: "draw2" | "draw4" | null = room.pendingType ?? null;
+    const chainValue: number | null = room.chainValue ?? null;
+    const chainPlayer: string | null = room.chainPlayer ?? null;
+
+    if (pendingDraw > 0) {
+      // Only allowed to play same-type stack
+      const isDraw2 = card.kind === "action" && card.action === "draw2";
+      // @ts-ignore
+      const isDraw4 = card.kind === "wild" && card.action === "draw4";
+      if (!((pendingType === "draw2" && isDraw2) || (pendingType === "draw4" && isDraw4))) {
+        throw new Error(`You must draw ${pendingDraw} or stack another ${pendingType === "draw2" ? "+2" : "+4"}`);
+      }
+      // color match is ignored for stacking +2; +4 is wild anyway
+    } else if (chainValue !== null) {
+      // Only the chaining player can act, and only with the same number
+      if (chainPlayer !== uid) throw new Error("Other player must end their chain");
+      if (!(card.kind === "number" && card.value === chainValue)) {
+        throw new Error(`You can only play another ${chainValue} or end your turn`);
+      }
+    } else {
+      // Normal legality
+      if (!matches(room.topCard as Card, card)) throw new Error("Illegal play");
+    }
+
+    // ---------- APPLY: remove from hand ----------
     const idx = myHand.findIndex(c => equalCard(c, card));
     if (idx < 0) throw new Error("Card not in hand");
     myHand.splice(idx, 1);
+    discard.push(card);
 
-    const discard: Card[] = [ ...(room.discardPile ?? []), card ];
+    // ---------- WIN CHECK ----------
+    if (myHand.length === 0) {
+      tx.set(myHandRef, { cards: [] }, { merge: true });
+      tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: 0 }, { merge: true });
+      tx.set(roomRef, {
+        topCard: card,
+        discardPile: discard,
+        status: "finished",
+        winnerUid: uid,
+        // clear flow fields
+        pendingDraw: 0,
+        pendingType: null,
+        chainValue: null,
+        chainPlayer: null,
+        finishedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return;
+    }
 
-    // next player (clockwise; 2+ players assumed)
-    const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
-    const ids = playersSnap.docs.map(d => d.id);
+    // ---------- EFFECTS & TURN LOGIC ----------
+    let turnIdx = nIdx; // default: pass to next
+    let nextPendingDraw = pendingDraw;
+    let nextPendingType: "draw2" | "draw4" | null = pendingType;
+    let nextChainValue: number | null = null;
+    let nextChainPlayer: string | null = null;
 
-    const dir = room.direction ?? 1;
-    const curIdx = ids.indexOf(uid);
-    const nextUid = ids[(curIdx + dir + ids.length) % ids.length];
+    if (pendingDraw > 0) {
+      // We already validated it's a same-type stack
+      if (pendingType === "draw2") nextPendingDraw += 2;
+      if (pendingType === "draw4") nextPendingDraw += 4;
+      // After stacking, pass burden to the next player
+      turnIdx = nIdx;
+      // keep same pendingType
+    } else if (chainValue !== null) {
+      // Continue number chain; keep turn if you still have same number
+      const stillHasSame = myHand.some(c => c.kind === "number" && c.value === chainValue);
+      if (stillHasSame) {
+        // player keeps turn
+        turnIdx = curIdx;
+        nextChainValue = chainValue;
+        nextChainPlayer = uid;
+      } else {
+        // pass turn
+        turnIdx = nIdx;
+      }
+    } else {
+      // No pending, no chain: resolve based on card
+      if (card.kind === "action") {
+        if (card.action === "skip") {
+          turnIdx = nextIndex(ids, nIdx, dir); // skip one
+        } else if (card.action === "reverse") {
+          dir = -dir;
+          // with 2 players, reverse behaves like skip
+          if (ids.length === 2) {
+            turnIdx = nextIndex(ids, nIdx, dir);
+          } else {
+            // after reversing, the next player is the previous player in the new direction
+            turnIdx = nextIndex(ids, curIdx, dir);
+          }
+        } else if (card.action === "draw2") {
+          nextPendingDraw = 2;
+          nextPendingType = "draw2";
+          turnIdx = nIdx; // victim's turn to respond
+        }
+      } else if (card.kind === "wild") {
+        // @ts-ignore
+        if (card.action === "draw4") {
+          nextPendingDraw = 4;
+          nextPendingType = "draw4";
+          turnIdx = nIdx; // victim's turn to respond
+        } else {
+          // plain wild color change: normal advance
+          turnIdx = nIdx;
+        }
+      } else if (card.kind === "number") {
+        // Offer number-chaining: keep turn if you still have same number
+        const val = card.value;
+        const stillHasSame = myHand.some(c => c.kind === "number" && c.value === val);
+        if (stillHasSame) {
+          turnIdx = curIdx;             // keep turn
+          nextChainValue = val;
+          nextChainPlayer = uid;
+        } else {
+          turnIdx = nIdx;
+        }
+      }
+    }
 
+    const nextUid = ids[turnIdx];
+
+    // ---------- WRITE STATE ----------
     tx.set(myHandRef, { cards: myHand }, { merge: true });
     tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
+
     tx.set(roomRef, {
       topCard: card,
       discardPile: discard,
+      drawPile,
       currentTurn: nextUid,
+      direction: dir,
+      pendingDraw: nextPendingDraw,
+      pendingType: nextPendingType,
+      chainValue: nextChainValue,
+      chainPlayer: nextChainPlayer,
       updatedAt: serverTimestamp()
     }, { merge: true });
   });
 }
 
-/** Draw one (turn enforced; drawing ends your turn) */
+/** Draw action:
+ * - If there's a pending stack against you, draw ALL pending and end turn.
+ * - Otherwise draw ONE and end turn.
+ */
 export async function drawOneOnline(roomId: string) {
   await ensureAnonAuth();
   const uid = auth.currentUser!.uid;
@@ -146,25 +289,83 @@ export async function drawOneOnline(roomId: string) {
     if (room.currentTurn !== uid) throw new Error("Not your turn");
 
     const drawPile: Card[] = [ ...(room.drawPile ?? []) ];
-    if (!drawPile.length) throw new Error("No cards to draw");
 
-    const drawn = drawPile.pop()!;
-    myHand.push(drawn);
-
-    // end turn after draw (simple rule)
+    // players
     const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
     const ids = playersSnap.docs.map(d => d.id);
-
     const dir = room.direction ?? 1;
     const curIdx = ids.indexOf(uid);
-    const nextUid = ids[(curIdx + dir + ids.length) % ids.length];
+    const nextUid = ids[nextIndex(ids, curIdx, dir)];
+
+    const pendingDraw: number = room.pendingDraw ?? 0;
+
+    if (pendingDraw > 0) {
+      // Draw ALL pending, clear, and pass
+      for (let i = 0; i < pendingDraw; i++) {
+        if (!drawPile.length) throw new Error("No cards to draw"); // MVP: no reshuffle
+        myHand.push(drawPile.pop()!);
+      }
+
+      tx.set(myHandRef, { cards: myHand }, { merge: true });
+      tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
+      tx.set(roomRef, {
+        drawPile,
+        currentTurn: nextUid,
+        pendingDraw: 0,
+        pendingType: null,
+        chainValue: null,
+        chainPlayer: null,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return;
+    }
+
+    // Normal draw ONE, end turn
+    if (!drawPile.length) throw new Error("No cards to draw");
+    const drawn = drawPile.pop()!;
+    myHand.push(drawn);
 
     tx.set(myHandRef, { cards: myHand }, { merge: true });
     tx.set(doc(db, "rooms", roomId, "players", uid), { handCount: myHand.length }, { merge: true });
     tx.set(roomRef, {
       drawPile,
       currentTurn: nextUid,
+      chainValue: null,
+      chainPlayer: null,
       updatedAt: serverTimestamp()
     }, { merge: true });
   });
 }
+
+/** End the current player's voluntary number-chain turn (no draw). */
+export async function endTurnOnline(roomId: string) {
+  await ensureAnonAuth();
+  const uid = auth.currentUser!.uid;
+  const roomRef = doc(db, "rooms", roomId);
+
+  await runTransaction(db, async (tx) => {
+    const roomSnap = await tx.get(roomRef);
+    if (!roomSnap.exists()) throw new Error("Room missing");
+    const room = roomSnap.data() as any;
+
+    if (room.currentTurn !== uid) throw new Error("Not your turn");
+    if (room.chainPlayer !== uid || room.chainValue === null) {
+      throw new Error("You have nothing to end");
+    }
+
+    const playersSnap = await getDocs(collection(db, "rooms", roomId, "players"));
+    const ids = playersSnap.docs.map(d => d.id);
+    const dir = room.direction ?? 1;
+    const curIdx = ids.indexOf(uid);
+    const nextUid = ids[nextIndex(ids, curIdx, dir)];
+
+    tx.set(roomRef, {
+      currentTurn: nextUid,
+      chainValue: null,
+      chainPlayer: null,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  });
+}
+
+//HELLO JUST TO TEST
