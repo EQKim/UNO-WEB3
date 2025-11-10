@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { resolve } from "path";
 import vue from "@vitejs/plugin-vue";
 
 // Inject a build-time stamp so each deploy produces a distinct bundle
@@ -9,5 +10,13 @@ export default defineConfig({
   base: "/UNO-WEB3/",
   define: {
     __BUILD_TIME__: JSON.stringify(buildTime)
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        react: resolve(__dirname, "react.html")
+      }
+    }
   }
 });
