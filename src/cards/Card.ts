@@ -25,3 +25,7 @@ export type WildCard = {
 
 export type Card = NumberCard | ActionCard | WildCard
 export type TypedCard<K extends Card["kind"]> = Extract<Card, { kind: K }>
+
+// Assignment-1 convenience aliases
+export type Type = Card["kind"]; // "number" | "action" | "wild"
+export type ColouredCard = NumberCard | ActionCard;
