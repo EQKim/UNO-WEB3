@@ -150,7 +150,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { Card } from "../cards/Card";
 import CardView from "../ui/CardView.vue";
 import {
-  subscribeOnlineGame,
   startGameClient,
   playCardOnline,
   drawOneOnline,
@@ -158,24 +157,23 @@ import {
 } from "./OnlineGame";
 import { matches } from "../cards/Rules";
 import { auth } from "../firebase";
+import { useSelector } from "../store/vue";
+import { startListeningToRoom } from "../store/streams";
 
 type Props = { roomId: string; isHost: boolean };
 const { roomId, isHost } = defineProps<Props>();
 
-const room = ref<any | null>(null);
-const players = ref<any[]>([]);
-const myHand = ref<Card[]>([]);
+// Redux + RxJS: select state slices maintained by store/streams
+const room = useSelector((s) => s.game.room as any | null);
+const players = useSelector((s) => s.game.players as any[]);
+const myHand = useSelector((s) => s.game.myHand as Card[]);
 const pendingWild = ref<{ index: number; card: Card } | null>(null);
 
 let stop: null | (() => void) = null;
 
 function startSub(id: string) {
   if (stop) stop();
-  stop = subscribeOnlineGame(id, {
-    onRoom: (r: any) => (room.value = r),
-    onPlayers: (p: any[]) => (players.value = p),
-    onMyHand: (h: Card[]) => (myHand.value = h)
-  });
+  stop = startListeningToRoom(id);
 }
 
 onMounted(() => startSub(roomId));
