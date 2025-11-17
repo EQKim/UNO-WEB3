@@ -224,7 +224,7 @@ export class Round {
       this.advanceIndex();
       return { drawn, played: false };
     }
-    const idx = this.current.hand.findPlayable(this.top, (c) => {
+    const idx = this.current.hand.findPlayable(this.top, (c: Card) => {
       if (this.chainPlayerId === playerId) {
         return c.kind === "number" && this.chainValue != null && c.value === this.chainValue;
       }
@@ -235,7 +235,7 @@ export class Round {
       if (card.kind === "wild") {
         // Choose color heuristically: most frequent color in current hand excluding wilds.
         const counts: Record<Color, number> = { red: 0, yellow: 0, green: 0, blue: 0 };
-        for (const c of this.current.hand.cards()) if (c.kind !== "wild") counts[c.color]++;
+        for (const c of this.current.hand.cards()) if (c.kind !== "wild") counts[c.color as Color]++;
         const chosen = (Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]?.[0] as Color) || "red";
         this.play(playerId, idx, chosen);
       } else {

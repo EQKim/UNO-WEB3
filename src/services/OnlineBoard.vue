@@ -99,26 +99,27 @@
         <div style="display: flex; gap: .5rem; align-items: center;">
           <button
             @click="onDraw"
-            :disabled="!isMyTurn || hasDrawnThisTurn"
+            :disabled="!isMyTurn || (youHavePlayable && !pendingDrawInfo) || hasDrawnThisTurn"
             :style="{
               padding: '.5rem 1rem',
               background: pendingDrawInfo ? '#dc2626' : '#3b82f6',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',
-              cursor: (isMyTurn && !hasDrawnThisTurn) ? 'pointer' : 'not-allowed',
+              cursor: (isMyTurn && (!youHavePlayable || pendingDrawInfo) && !hasDrawnThisTurn) ? 'pointer' : 'not-allowed',
               fontWeight: 'bold',
-              opacity: (isMyTurn && !hasDrawnThisTurn) ? '1' : '0.5'
+              opacity: (isMyTurn && (!youHavePlayable || pendingDrawInfo) && !hasDrawnThisTurn) ? '1' : '0.5'
             }"
+            :title="hasDrawnThisTurn ? 'Already drew this turn' : (youHavePlayable && !pendingDrawInfo ? 'You must play a card' : '')"
           >
             {{ pendingDrawInfo ? `Draw +${pendingDrawInfo.n}` : "Draw Card" }}
           </button>
 
           <button
-            v-if="chainingActive || hasDrawnThisTurn"
+            v-if="(chainingActive || (hasDrawnThisTurn && !youHavePlayable)) && !pendingDrawInfo"
             @click="onEndTurn"
             style="padding: .5rem 1rem; background: #f59e0b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;"
-            :title="hasDrawnThisTurn ? 'Pass turn after drawing' : 'End number chain'"
+            :title="chainingActive ? 'End number chain' : 'End your turn (no playable cards)'"
           >
             End Turn
           </button>
@@ -204,12 +205,12 @@ let unsubscribe: (() => void) | null = null;
 onMounted(() => {
   unsubscribe = subscribeOnlineGame(roomId, {
     onRoom: (r) => {
-      const prevTurn = room.value?.currentTurn;
-      room.value = r;
-      // Reset draw flag when turn changes
-      if (prevTurn !== r?.currentTurn) {
+      const wasMyTurn = room.value?.currentTurn === myUid.value;
+      const isNowMyTurn = r?.currentTurn === myUid.value;
+      if (!wasMyTurn && isNowMyTurn) {
         hasDrawnThisTurn.value = false;
       }
+      room.value = r;
     },
     onPlayers: (ps) => (players.value = ps),
     onMyHand: (hand) => (myHand.value = hand)
@@ -241,7 +242,28 @@ const pendingType = computed<"draw2" | "draw4" | null>(() => (room.value?.pendin
 const chainingActive = computed<boolean>(() => room.value?.chainPlayer === myUid.value && room.value?.chainValue !== null);
 
 // Standard playable if no pending stack
-const youHavePlayable = computed<boolean>(() => !!top.value && myHand.value.some(c => matches(top.value as Card, c)));
+const youHavePlayable = computed<boolean>(() => {
+  if (!top.value) return false;
+  
+  // During pending draw, only specific counter cards are playable
+  if (pendingType.value) {
+    if (pendingType.value === "draw2") {
+      return myHand.value.some(c => c.kind === "action" && c.action === "draw2");
+    }
+    if (pendingType.value === "draw4") {
+      return myHand.value.some(c => c.kind === "wild" && c.action === "wildDraw4");
+    }
+    return false;
+  }
+  
+  // During chaining, only same number cards are playable
+  if (chainingActive.value) {
+    return myHand.value.some(c => c.kind === "number" && c.value === room.value?.chainValue);
+  }
+  
+  // Normal play: any matching card OR wild
+  return myHand.value.some(c => c.kind === "wild" || matches(top.value as Card, c));
+});
 
 const winner = computed<string | null>(() => {
   const wuid = room.value?.winnerUid;
@@ -310,7 +332,6 @@ async function onPlayCard(c: Card, i: number) {
 
   try {
     await playCardOnline(roomId, c);
-    hasDrawnThisTurn.value = false; // Reset after playing
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
@@ -319,10 +340,7 @@ async function onPlayCard(c: Card, i: number) {
 async function onDraw() {
   try {
     await drawOneOnline(roomId);
-    // Mark that we've drawn during this turn (unless it was a penalty draw)
-    if (!pendingDrawInfo.value) {
-      hasDrawnThisTurn.value = true;
-    }
+    hasDrawnThisTurn.value = true;
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
@@ -331,7 +349,7 @@ async function onDraw() {
 async function onEndTurn() {
   try {
     await endTurnOnline(roomId);
-    hasDrawnThisTurn.value = false; // Reset after ending turn
+    hasDrawnThisTurn.value = false;
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
