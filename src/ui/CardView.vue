@@ -1,10 +1,9 @@
 <template>
-  <button
-    @click="handleClick"
+  <div
     :title="JSON.stringify(card)"
-    class="m-1 p-0 rounded-lg border border-slate-400 overflow-hidden bg-white hover:shadow transition disabled:opacity-100"
-    :style="{ width: `${dims.w}px`, height: `${dims.h}px`, cursor: onPlay ? 'pointer' : 'default' }"
-    :disabled="!onPlay"
+    class="m-1 p-0 rounded-lg border border-slate-400 overflow-hidden bg-white hover:shadow transition"
+    :style="{ width: `${dims.w}px`, height: `${dims.h}px`, cursor: onPlay ? 'pointer' : 'inherit' }"
+    @click="handleClick"
   >
     <img
       v-if="!imgError"
@@ -12,11 +11,12 @@
       :alt="labelFor(card)"
       class="w-full h-full object-contain"
       @error="imgError = true"
+      style="pointer-events: none;"
     />
     <div v-else class="w-full h-full flex items-center justify-center text-xs px-1">
       {{ labelFor(card) }}
     </div>
-  </button>
+  </div>
 </template>
 
 <script setup lang="ts">

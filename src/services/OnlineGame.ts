@@ -5,8 +5,8 @@ import type { Card } from "../cards/Card";
 
 /**
  * GraphQL endpoint
- * - dev: vercel dev (yoga at http://localhost:3000/api/graphql)
- * - prod: your deployed Vercel function
+ * Using deployed Vercel endpoint
+ * NOTE: If you get CORS errors, the server needs to allow your origin
  */
 const GRAPHQL_URL = "https://uno-graphql-web-3.vercel.app/api/graphql";
 

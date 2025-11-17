@@ -1,188 +1,235 @@
 <template>
-  <div v-if="room" class="p-6 space-y-3">
-    <h1 class="text-3xl font-extrabold">UNO (Online)</h1>
+  <div v-if="room" style="font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 1rem; max-width: 1200px; margin: 0 auto;">
+    <h1>UNO (Online)</h1>
 
-    <div><b>Room:</b> {{ roomId }}</div>
-
-    <div class="flex items-center gap-2">
-      <div><b>Code:</b> <code>{{ room.code ?? "—" }}</code></div>
-      <button
-        v-if="room.code"
-        @click="copyCode"
-        class="px-2 py-1 text-sm rounded border"
-      >
-        Copy
-      </button>
+    <div style="margin: .5rem 0; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+      <div><b>Room:</b> {{ roomId }}</div>
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <b>Code:</b> <code style="background: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 4px;">{{ room.code ?? "—" }}</code>
+        <button
+          v-if="room.code"
+          @click="copyCode"
+          style="padding: .25rem .75rem; border: 1px solid #d1d5db; border-radius: 4px; background: white; cursor: pointer;"
+        >
+          Copy
+        </button>
+      </div>
+      <div><b>Status:</b> {{ room.status }}</div>
     </div>
-
-    <div><b>Status:</b> {{ room.status }}</div>
-    <div>
-      <b>Turn:</b>
-      {{ room.status === "finished" ? "—" : (isMyTurn ? "You" : (room.currentTurn ?? "—")) }}
-    </div>
-    <div><b>Players:</b> {{ players.map(p => p.displayName).join(", ") }}</div>
 
     <!-- Lobby or finished → Start button for host -->
-    <div class="mt-2" v-if="room.status === 'lobby' || room.status === 'finished'">
+    <div style="margin: 1rem 0;" v-if="room.status === 'lobby' || room.status === 'finished'">
       <button
         v-if="computedIsHost"
-        class="px-4 py-2 rounded bg-emerald-600 text-white disabled:opacity-50"
-        :disabled="players.length < 2"
-        :title="players.length < 2 ? 'Need at least 2 players' : 'Start game'"
         @click="startGameClient(roomId)"
+        :disabled="players.length < 2"
+        style="padding: .5rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;"
+        :style="{ opacity: players.length < 2 ? '0.5' : '1', cursor: players.length < 2 ? 'not-allowed' : 'pointer' }"
+        :title="players.length < 2 ? 'Need at least 2 players' : 'Start game'"
       >
         Start game
       </button>
-      <div v-else>Waiting for host to start…</div>
+      <div v-else style="color: #6b7280;">Waiting for host to start…</div>
     </div>
 
     <template v-if="room.status === 'playing'">
-      <div class="mt-2 flex items-center gap-3">
-        <div class="text-sm font-semibold">Top card:</div>
-        <CardView v-if="top" :card="top" size="lg" />
-
-        <!-- Current color badge for wild -->
-        <div
-          v-if="topChosenColor"
-          class="ml-2 px-2 py-1 rounded text-sm font-semibold border"
-          title="Current color chosen for wild"
-          :style="{
-            background:
-              topChosenColor === 'red' ? '#fee2e2' :
-              topChosenColor === 'yellow' ? '#fef9c3' :
-              topChosenColor === 'green' ? '#dcfce7' :
-              '#dbeafe'
-          }"
-        >
-          Current color: {{ topChosenColor }}
+      <!-- Top Card Display -->
+      <div style="background: #2a2a2a; color: #fff; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 .5rem 0;">Top Card</h3>
+        <div style="position: relative; display: inline-block;">
+          <CardView v-if="top" :card="top" size="lg" />
+          <div
+            v-if="topChosenColor"
+            :style="{
+              position: 'absolute',
+              bottom: '10px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: topChosenColor === 'red' ? '#ef4444' : topChosenColor === 'yellow' ? '#fbbf24' : topChosenColor === 'green' ? '#22c55e' : '#3b82f6',
+              color: topChosenColor === 'yellow' ? '#000' : '#fff',
+              padding: '4px 12px',
+              borderRadius: '12px',
+              fontWeight: 'bold',
+              fontSize: '0.85rem',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+              border: '2px solid white'
+            }"
+          >
+            {{ topChosenColor.toUpperCase() }}
+          </div>
         </div>
-
-        <!-- Pending draw info (stacking) -->
-        <div
-          v-if="pendingDrawInfo"
-          class="ml-2 px-2 py-1 rounded text-sm font-semibold border"
-        >
-          {{ pendingDrawInfo.type === 'draw4' ? '+4' : '+2' }} stack: draw {{ pendingDrawInfo.n }}
-        </div>
+        <p style="margin-top: .5rem; font-size: .9rem;">
+          Current: <strong>{{ isMyTurn ? 'You' : currentPlayerName }}</strong> |
+          Direction: <strong>{{ room.direction === 1 ? '→' : '←' }}</strong>
+          <span v-if="pendingDrawInfo"> | Pending: +{{ pendingDrawInfo.n }} ({{ pendingDrawInfo.type }})</span>
+        </p>
       </div>
 
-      <div class="mt-3 flex items-center gap-2">
-        <button
-          @click="onDraw"
-          :disabled="!isMyTurn"
-          class="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50"
-          :title="pendingDrawInfo
-            ? `Draw ${pendingDrawInfo.n} and pass`
-            : (youHavePlayable ? 'You already have a playable card' : 'Draw one')"
-        >
-          {{ pendingDrawInfo ? `Draw ${pendingDrawInfo.n}` : "Draw" }}
-        </button>
-
-        <!-- End turn shows only during number-chaining -->
-        <button
-          v-if="chainingActive"
-          @click="onEndTurn"
-          class="px-4 py-2 rounded bg-gray-700 text-white"
-          title="Finish your number chain and pass the turn"
-        >
-          End turn
-        </button>
-      </div>
-
-      <div class="mt-4">
-        <h3 class="font-semibold mb-1">Your hand ({{ myHand.length }})</h3>
+      <!-- Human Player Hand (You) -->
+      <div
+        v-if="isMyTurn"
+        style="background: #f0f9ff; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 2px solid #3b82f6;"
+      >
+        <h3 style="margin: 0 0 .5rem 0; color: #1e40af;">Your Turn!</h3>
+        <p style="margin-bottom: .5rem; font-size: .9rem;">Click a card to play it, or draw a card:</p>
 
         <!-- Inline wild picker -->
-        <div v-if="pendingWild" class="mb-2 flex items-center gap-2">
-          <span class="text-sm">Pick color:</span>
-          <button type="button" @click="playChosenWild('red')" class="px-3 py-1 rounded border" style="background:#ef4444;color:white">red</button>
-          <button type="button" @click="playChosenWild('yellow')" class="px-3 py-1 rounded border" style="background:#eab308">yellow</button>
-          <button type="button" @click="playChosenWild('green')" class="px-3 py-1 rounded border" style="background:#22c55e;color:white">green</button>
-          <button type="button" @click="playChosenWild('blue')" class="px-3 py-1 rounded border" style="background:#3b82f6;color:white">blue</button>
-          <button type="button" @click="pendingWild = null" class="px-2 py-1 rounded border" title="Cancel">Cancel</button>
+        <div v-if="pendingWild" style="margin-bottom: 1rem; padding: 1rem; background: white; border-radius: 8px; border: 2px solid #3b82f6;">
+          <h3 style="margin: 0 0 .75rem 0;">Choose a color:</h3>
+          <div style="display: flex; gap: 1rem;">
+            <button @click="playChosenWild('red')" style="width: 80px; height: 80px; background: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff;">Red</button>
+            <button @click="playChosenWild('yellow')" style="width: 80px; height: 80px; background: #fbbf24; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #000;">Yellow</button>
+            <button @click="playChosenWild('green')" style="width: 80px; height: 80px; background: #22c55e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff;">Green</button>
+            <button @click="playChosenWild('blue')" style="width: 80px; height: 80px; background: #3b82f6; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff;">Blue</button>
+            <button @click="pendingWild = null" style="width: 80px; height: 80px; background: #6b7280; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff;">Cancel</button>
+          </div>
         </div>
 
-        <div class="flex flex-wrap gap-1.5">
-          <button
+        <div v-else style="display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem;">
+          <div
             v-for="(c, i) in myHand"
             :key="i"
-            type="button"
             @click="onPlayCard(c, i)"
-            :disabled="!cardClickable(c)"
-            :aria-disabled="!cardClickable(c)"
-            class="relative inline-block p-0 border-0 bg-transparent"
-            :class="cardClickable(c) ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'"
-            :title="!isMyTurn
-              ? 'Not your turn'
-              : pendingType
-                ? (pendingType === 'draw4' ? 'Only +4 can be played (or Draw)' : 'Only +2 can be played (or Draw)')
-                : undefined"
+            :class="['card-wrapper', { 'disabled': !cardClickable(c) }]"
           >
             <CardView :card="c" size="md" />
-            <span class="absolute inset-0" />
+          </div>
+        </div>
+
+        <div style="display: flex; gap: .5rem; align-items: center;">
+          <button
+            @click="onDraw"
+            :disabled="!isMyTurn || hasDrawnThisTurn"
+            :style="{
+              padding: '.5rem 1rem',
+              background: pendingDrawInfo ? '#dc2626' : '#3b82f6',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: (isMyTurn && !hasDrawnThisTurn) ? 'pointer' : 'not-allowed',
+              fontWeight: 'bold',
+              opacity: (isMyTurn && !hasDrawnThisTurn) ? '1' : '0.5'
+            }"
+          >
+            {{ pendingDrawInfo ? `Draw +${pendingDrawInfo.n}` : "Draw Card" }}
           </button>
+
+          <button
+            v-if="chainingActive || hasDrawnThisTurn"
+            @click="onEndTurn"
+            style="padding: .5rem 1rem; background: #f59e0b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;"
+            :title="hasDrawnThisTurn ? 'Pass turn after drawing' : 'End number chain'"
+          >
+            End Turn
+          </button>
+        </div>
+      </div>
+
+      <!-- When NOT your turn -->
+      <div v-else style="background: #f7f7f8; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 .5rem 0;">Your Hand ({{ myHand.length }})</h3>
+        <div style="display: flex; gap: .5rem; flex-wrap: wrap;">
+          <div v-for="(c, i) in myHand" :key="i" class="card-wrapper disabled">
+            <CardView :card="c" size="md" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Other Players -->
+      <div style="background: #f7f7f8; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 .5rem 0;">Players</h3>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <div
+            v-for="p of players"
+            :key="p.id"
+            :style="{
+              padding: '.5rem 1rem',
+              borderRadius: '6px',
+              background: p.id === room.currentTurn ? '#fef3c7' : '#fff',
+              border: p.id === room.currentTurn ? '2px solid #f59e0b' : '1px solid #e5e7eb',
+              fontWeight: p.id === room.currentTurn ? 'bold' : 'normal'
+            }"
+          >
+            {{ p.displayName }} — {{ p.handCount }} card{{ p.handCount === 1 ? '' : 's' }}
+          </div>
         </div>
       </div>
     </template>
 
     <!-- Win screen -->
-    <div v-if="room.status === 'finished'" class="mt-4 p-4 rounded-xl border bg-white/70 backdrop-blur">
-      <div class="text-xl font-bold mb-1">🎉 {{ winner ?? 'A player' }} won!</div>
-      <div class="text-sm text-gray-600 mb-3">
-        Game over{{ topChosenColor ? ` — final color: ${topChosenColor}` : "" }}.
-      </div>
+    <div v-if="room.status === 'finished'" style="margin-top: 1rem; padding: 1.5rem; border-radius: 12px; border: 2px solid #10b981; background: #f0fdf4;">
+      <p style="font-size: 1.2rem; color: #4ade80; margin: 0 0 .5rem 0;">
+        🎉 <strong>{{ winner ?? 'A player' }}</strong> wins!
+      </p>
       <button
         v-if="computedIsHost"
-        class="px-4 py-2 rounded bg-emerald-600 text-white"
         @click="startGameClient(roomId)"
+        style="padding: .5rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;"
       >
-        Start new game
+        Start New Game
       </button>
-      <div v-else>Waiting for host to start a new game…</div>
+      <div v-else style="color: #6b7280;">Waiting for host to start a new game…</div>
     </div>
   </div>
 
-  <div v-else class="p-6">Loading room…</div>
+  <div v-else style="padding: 2rem; text-align: center; color: #6b7280;">Loading room…</div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { Card } from "../cards/Card";
 import CardView from "../ui/CardView.vue";
 import {
   startGameClient,
   playCardOnline,
   drawOneOnline,
-  endTurnOnline
+  endTurnOnline,
+  subscribeOnlineGame
 } from "./OnlineGame";
 import { matches } from "../cards/Rules";
 import { auth } from "../firebase";
-import { useSelector } from "../store/vue";
-import { startListeningToRoom } from "../store/streams";
 
 type Props = { roomId: string; isHost: boolean };
 const { roomId, isHost } = defineProps<Props>();
 
-// Redux + RxJS: select state slices maintained by store/streams
-const room = useSelector((s) => s.game.room as any | null);
-const players = useSelector((s) => s.game.players as any[]);
-const myHand = useSelector((s) => s.game.myHand as Card[]);
+// Local reactive state instead of Redux
+const room = ref<any | null>(null);
+const players = ref<any[]>([]);
+const myHand = ref<Card[]>([]);
 const pendingWild = ref<{ index: number; card: Card } | null>(null);
+const hasDrawnThisTurn = ref(false);
 
-let stop: null | (() => void) = null;
+let unsubscribe: (() => void) | null = null;
 
-function startSub(id: string) {
-  if (stop) stop();
-  stop = startListeningToRoom(id);
-}
+onMounted(() => {
+  unsubscribe = subscribeOnlineGame(roomId, {
+    onRoom: (r) => {
+      const prevTurn = room.value?.currentTurn;
+      room.value = r;
+      // Reset draw flag when turn changes
+      if (prevTurn !== r?.currentTurn) {
+        hasDrawnThisTurn.value = false;
+      }
+    },
+    onPlayers: (ps) => (players.value = ps),
+    onMyHand: (hand) => (myHand.value = hand)
+  });
+});
 
-onMounted(() => startSub(roomId));
-onUnmounted(() => { if (stop) stop(); });
-watch(() => roomId, (id) => { if (id) startSub(id); });
+onUnmounted(() => {
+  if (unsubscribe) unsubscribe();
+});
 
 const top = computed<Card | null>(() => room.value?.topCard ?? null);
 const myUid = computed(() => auth.currentUser?.uid ?? null);
 const isMyTurn = computed(() => room.value?.currentTurn === myUid.value && room.value?.status === "playing");
+
+const currentPlayerName = computed(() => {
+  const currentTurn = room.value?.currentTurn;
+  if (!currentTurn) return '—';
+  const player = players.value.find(p => p.id === currentTurn);
+  return player?.displayName ?? currentTurn;
+});
 
 // Host fallback: prop OR explicit host in room OR first joined player
 const computedIsHost = computed(() =>
@@ -241,8 +288,15 @@ const pendingDrawInfo = computed<null | { n: number; type: "draw2" | "draw4" | n
 function cardClickable(c: Card) {
   if (!isMyTurn.value) return false;
   if (pendingType.value) return canStackSame(c);
+  
+  // During chaining, only allow same numbers
+  if (chainingActive.value) {
+    return c.kind === "number" && c.value === room.value?.chainValue;
+  }
+  
+  // Normal play: must match top card
   const looksPlayable = !!top.value && matches(top.value as Card, c);
-  return looksPlayable || canChainNumber(c);
+  return looksPlayable;
 }
 
 async function onPlayCard(c: Card, i: number) {
@@ -256,6 +310,7 @@ async function onPlayCard(c: Card, i: number) {
 
   try {
     await playCardOnline(roomId, c);
+    hasDrawnThisTurn.value = false; // Reset after playing
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
@@ -264,6 +319,10 @@ async function onPlayCard(c: Card, i: number) {
 async function onDraw() {
   try {
     await drawOneOnline(roomId);
+    // Mark that we've drawn during this turn (unless it was a penalty draw)
+    if (!pendingDrawInfo.value) {
+      hasDrawnThisTurn.value = true;
+    }
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
@@ -272,6 +331,7 @@ async function onDraw() {
 async function onEndTurn() {
   try {
     await endTurnOnline(roomId);
+    hasDrawnThisTurn.value = false; // Reset after ending turn
   } catch (e: any) {
     alert(e?.message ?? String(e));
   }
@@ -283,3 +343,31 @@ async function copyCode() {
   } catch { /* no-op */ }
 }
 </script>
+
+<style scoped>
+h1 {
+  margin: 0 0 .5rem 0;
+}
+
+.card-wrapper {
+  cursor: pointer;
+  position: relative;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  user-select: none;
+}
+
+.card-wrapper:not(.disabled) {
+  cursor: pointer;
+}
+
+.card-wrapper:not(.disabled):hover {
+  transform: translateY(-8px);
+}
+
+.card-wrapper.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+</style>

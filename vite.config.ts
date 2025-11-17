@@ -8,6 +8,9 @@ const buildTime = new Date().toISOString();
 export default defineConfig({
   plugins: [vue()],
   base: "/UNO-WEB3/",
+  server: {
+    port: 5173
+  },
   define: {
     __BUILD_TIME__: JSON.stringify(buildTime)
   },
