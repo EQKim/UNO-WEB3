@@ -46,8 +46,14 @@ export class Round {
     this.players = playerIds.map(id => ({ id, hand: new PlayerHand() }));
     const deal = opts?.deal ?? 7;
     for (let r = 0; r < deal; r++) this.players.forEach(p => p.hand.add(this.drawOneStrict()));
-    // Flip initial top card (must not be wild draw4 ideally; if it is we just accept)
-    this.discard.push(this.drawOneStrict());
+    // Flip initial top card (must not be a wild card per official UNO rules)
+    let startCard = this.drawOneStrict();
+    while (startCard.kind === "wild") {
+      // Put wild back and draw another
+      this.deck.refill([startCard]);
+      startCard = this.drawOneStrict();
+    }
+    this.discard.push(startCard);
   }
 
   private drawOneStrict(): Card { const d = this.deck.draw(1)[0]; if (!d) throw new Error("Deck empty"); return d; }

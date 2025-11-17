@@ -15,8 +15,11 @@
       <!-- Top Card Display -->
       <div style="background: #2a2a2a; color: #fff; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
         <h3 style="margin: 0 0 .5rem 0;">Top Card</h3>
-        <div :style="cardStyle(snapshot.topCard)" style="display: inline-block; padding: 1.5rem 2rem; border-radius: 8px; font-size: 1.5rem; font-weight: bold;">
-          {{ describeCard(snapshot.topCard) }}
+        <div style="position: relative; display: inline-block;">
+          <img :src="getCardImage(snapshot.topCard)" :alt="describeCard(snapshot.topCard)" style="height: 150px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);" />
+          <div v-if="snapshot.topCard.kind === 'wild' && snapshot.chosenColor" :style="{ position: 'absolute', bottom: '10px', left: '50%', transform: 'translateX(-50%)', background: getColorHex(snapshot.chosenColor), color: snapshot.chosenColor === 'yellow' ? '#000' : '#fff', padding: '4px 12px', borderRadius: '12px', fontWeight: 'bold', fontSize: '0.85rem', boxShadow: '0 2px 4px rgba(0,0,0,0.3)', border: '2px solid white' }">
+            {{ snapshot.chosenColor.toUpperCase() }}
+          </div>
         </div>
         <p style="margin-top: .5rem; font-size: .9rem;">
           Current: <strong>{{ snapshot.currentPlayer }}</strong> | 
@@ -35,17 +38,24 @@
         <div style="display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem;">
           <div v-for="(card, idx) of playerHand" :key="idx" 
                @click="playCard(idx, card)"
-               :style="cardStyle(card)"
-               :class="{ 'drawn-card': idx === drawnCardIndex }"
-               style="cursor: pointer; padding: 1rem 1.5rem; border-radius: 8px; font-weight: bold; transition: transform 0.1s; border: 2px solid #000; position: relative;"
-               @mouseover="(e: any) => e.target.style.transform = 'translateY(-4px)'"
-               @mouseleave="(e: any) => e.target.style.transform = 'translateY(0)'">
-            {{ describeCard(card) }}
+               :class="['card-wrapper', { 'drawn-card': idx === drawnCardIndex }]">
+            <img :src="getCardImage(card)" :alt="describeCard(card)" style="height: 120px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); display: block;" />
             <span v-if="idx === drawnCardIndex" style="position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 0.7rem; white-space: nowrap; background: #10b981; color: white; padding: 2px 6px; border-radius: 3px;">Click to play!</span>
           </div>
         </div>
-        <button @click="drawCard" :disabled="hasPlayableCard" :style="{ padding: '.5rem 1rem', background: hasPlayableCard ? '#9ca3af' : '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: hasPlayableCard ? 'not-allowed' : 'pointer', fontWeight: 'bold' }">
-          Draw Card
+        <button @click="drawCard" 
+                :disabled="hasPlayableCard && !isPenaltyDraw" 
+                :class="{ 'penalty-draw-button': isPenaltyDraw }"
+                :style="{ 
+                  padding: '.5rem 1rem', 
+                  background: (hasPlayableCard && !isPenaltyDraw) ? '#9ca3af' : (isPenaltyDraw ? '#dc2626' : '#3b82f6'), 
+                  color: '#fff', 
+                  border: 'none', 
+                  borderRadius: '4px', 
+                  cursor: (hasPlayableCard && !isPenaltyDraw) ? 'not-allowed' : 'pointer', 
+                  fontWeight: 'bold' 
+                }">
+          {{ drawButtonText }}
         </button>
         <button v-if="snapshot.chainPlayerId === 'You'" @click="endTurn" style="padding: .5rem 1rem; background: #f59e0b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-left: .5rem;">
           End Turn
@@ -124,8 +134,38 @@ export default {
 
     const hasPlayableCard = computed(() => {
       if (!snapshot.value || playerHand.value.length === 0) return false;
+      
+      // Special case: if there's a pending draw (+2 or +4), you can only play matching counter cards
+      if (snapshot.value.pendingType) {
+        if (snapshot.value.pendingType === "draw2") {
+          // Can only counter +2 with another +2
+          return playerHand.value.some(card => 
+            card.kind === "action" && card.action === "draw2"
+          );
+        }
+        if (snapshot.value.pendingType === "draw4") {
+          // Can only counter +4 with another +4
+          return playerHand.value.some(card => 
+            card.kind === "wild" && card.action === "wildDraw4"
+          );
+        }
+      }
+      
+      // Normal matching rules
       const topCard = snapshot.value.topCard;
       return playerHand.value.some(card => matches(topCard, card));
+    });
+
+    const drawButtonText = computed(() => {
+      if (!snapshot.value) return "Draw Card";
+      if (snapshot.value.pendingDraw && snapshot.value.pendingDraw > 0) {
+        return `Draw +${snapshot.value.pendingDraw}`;
+      }
+      return "Draw Card";
+    });
+
+    const isPenaltyDraw = computed(() => {
+      return snapshot.value?.pendingDraw && snapshot.value.pendingDraw > 0;
     });
 
     function describeCard(c: Card) {
@@ -133,6 +173,31 @@ export default {
       if (c.kind === "number") return `${c.color} ${c.value}`;
       if (c.kind === "action") return `${c.color} ${c.action}`;
       return `${c.action}${c.chosenColor ? `(${c.chosenColor})` : ""}`;
+    }
+
+    function getCardImage(c: Card): string {
+      if (!c) return "";
+      if (c.kind === "number") {
+        return `/cards/${c.color}_${c.value}.png`;
+      }
+      if (c.kind === "action") {
+        return `/cards/${c.color}_${c.action}.png`;
+      }
+      // wild cards
+      if (c.action === "wildDraw4") {
+        return `/cards/wildDraw4.png`;
+      }
+      return `/cards/wild.png`;
+    }
+
+    function getColorHex(color: Color): string {
+      const colors: Record<Color, string> = {
+        red: "#ef4444",
+        yellow: "#fbbf24",
+        green: "#22c55e",
+        blue: "#3b82f6"
+      };
+      return colors[color] || "#6b7280";
     }
 
     function cardStyle(c: Card) {
@@ -148,7 +213,13 @@ export default {
 
     function formatHistory(h: any) {
       switch (h.kind) {
-        case "play": return `PLAY ${h.playerId} -> ${describeCard(h.card)}${h.chosenColor ? ` as ${h.chosenColor}` : ""}`;
+        case "play": {
+          const cardDesc = describeCard(h.card);
+          if (h.chosenColor) {
+            return `PLAY ${h.playerId} -> ${cardDesc} → chose ${h.chosenColor.toUpperCase()}`;
+          }
+          return `PLAY ${h.playerId} -> ${cardDesc}`;
+        }
         case "draw": return `DRAW ${h.playerId} x${h.amount}`;
         case "penaltyDraw": return `PENALTY ${h.playerId} +${h.amount} (${h.reason})`;
         case "endTurn": return `END ${h.playerId}`;
@@ -176,24 +247,20 @@ export default {
           snapshot.value = currentRound.snapshot();
           drawnCardIndex.value = null;
           
-          // If this was a drawn card, end turn automatically
-          if (wasDrawnCard && snapshot.value.currentPlayer === "You") {
-            setTimeout(() => {
-              if (round.value && snapshot.value?.currentPlayer === "You") {
-                try {
-                  currentRound.endTurn("You");
-                  snapshot.value = currentRound.snapshot();
-                  if (!snapshot.value.winner) {
-                    setTimeout(() => botsLoop(currentRound), 300);
-                  }
-                } catch {
-                  // Chain already ended, just continue
-                  if (!snapshot.value.winner) {
-                    setTimeout(() => botsLoop(currentRound), 300);
-                  }
-                }
+          // If this was a drawn card, force end turn (can't chain with drawn cards)
+          if (wasDrawnCard) {
+            // Break any chain that was started
+            if (snapshot.value.chainPlayerId === "You") {
+              try {
+                currentRound.endTurn("You");
+                snapshot.value = currentRound.snapshot();
+              } catch {
+                // Already advanced, that's fine
               }
-            }, 100);
+            }
+            if (!snapshot.value.winner) {
+              setTimeout(() => botsLoop(currentRound), 300);
+            }
           } else if (!snapshot.value.winner) {
             setTimeout(() => botsLoop(currentRound), 300);
           }
@@ -214,23 +281,20 @@ export default {
         pendingCardIndex.value = null;
         drawnCardIndex.value = null;
         
-        // If this was a drawn wild card, end turn automatically
-        if (wasDrawnCard && snapshot.value.currentPlayer === "You") {
-          setTimeout(() => {
-            if (round.value && snapshot.value?.currentPlayer === "You") {
-              try {
-                currentRound.endTurn("You");
-                snapshot.value = currentRound.snapshot();
-                if (!snapshot.value.winner) {
-                  setTimeout(() => botsLoop(currentRound), 300);
-                }
-              } catch {
-                if (!snapshot.value.winner) {
-                  setTimeout(() => botsLoop(currentRound), 300);
-                }
-              }
+        // If this was a drawn wild card, force end turn (can't chain with drawn cards)
+        if (wasDrawnCard) {
+          // Wild cards don't start chains, but break them if active
+          if (snapshot.value.chainPlayerId === "You") {
+            try {
+              currentRound.endTurn("You");
+              snapshot.value = currentRound.snapshot();
+            } catch {
+              // Already advanced
             }
-          }, 100);
+          }
+          if (!snapshot.value.winner) {
+            setTimeout(() => botsLoop(currentRound), 300);
+          }
         } else if (!snapshot.value.winner) {
           setTimeout(() => botsLoop(currentRound), 300);
         }
@@ -245,14 +309,22 @@ export default {
       if (!round.value || snapshot.value?.currentPlayer !== "You") return;
       const currentRound = round.value as Round;
       const handSizeBefore = round.value.getHand("You").length;
+      const wasPenalty = snapshot.value.pendingDraw && snapshot.value.pendingDraw > 0;
       try {
         currentRound.draw("You");
         snapshot.value = currentRound.snapshot();
         const handSizeAfter = round.value.getHand("You").length;
         
-        // Highlight the drawn card (it's the last one in hand)
-        if (handSizeAfter > handSizeBefore) {
-          drawnCardIndex.value = handSizeAfter - 1;
+        // If it was a penalty draw, turn already advanced - start bots
+        if (wasPenalty) {
+          if (!snapshot.value.winner && snapshot.value.currentPlayer !== "You") {
+            setTimeout(() => botsLoop(currentRound), 300);
+          }
+        } else {
+          // Highlight the drawn card (it's the last one in hand) for normal draws
+          if (handSizeAfter > handSizeBefore) {
+            drawnCardIndex.value = handSizeAfter - 1;
+          }
         }
       } catch (e: any) {
         alert(`Error drawing: ${e.message}`);
@@ -329,9 +401,9 @@ export default {
     }
 
     return { 
-      numBots, running, snapshot, playerHand, showColorPicker, drawnCardIndex, hasPlayableCard,
+      numBots, running, snapshot, playerHand, showColorPicker, drawnCardIndex, hasPlayableCard, drawButtonText, isPenaltyDraw,
       startGame, stopGame, playCard, selectColor, drawCard, endTurn,
-      describeCard, cardStyle, formatHistory
+      describeCard, cardStyle, formatHistory, getCardImage, getColorHex
     };
   }
 };
@@ -341,10 +413,25 @@ export default {
 /* minimal styles */
 h1 { margin: 0 0 .5rem 0; }
 
-.drawn-card {
+.card-wrapper {
+  cursor: pointer;
+  position: relative;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+
+.card-wrapper:hover {
+  transform: translateY(-8px);
+}
+
+.drawn-card img {
   animation: pulse 1s ease-in-out infinite;
   box-shadow: 0 0 20px 5px #10b981 !important;
   border: 3px solid #10b981 !important;
+}
+
+.penalty-draw-button {
+  animation: pulse-red 1s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -353,6 +440,15 @@ h1 { margin: 0 0 .5rem 0; }
   }
   50% {
     box-shadow: 0 0 30px 10px #10b981;
+  }
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 15px 3px #dc2626;
+  }
+  50% {
+    box-shadow: 0 0 25px 8px #dc2626;
   }
 }
 </style>
