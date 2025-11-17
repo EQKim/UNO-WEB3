@@ -3,15 +3,46 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "homepage": "https://EQKim.github.io/UNO-WEB3/",
   "scripts": {
-    "dev": "tsx src/offline/demo.ts",
-    "dev:history": "tsx src/offline/demo.ts --history",
-    "dev:verbose": "tsx src/offline/demo.ts --verbose",
-    "typecheck": "tsc -p tsconfig.app.json"
+    "dev": "vite",
+    "start": "vite",
+    "dev:vue": "vite --open vue.html",
+    "dev:react": "vite --open react.html",
+    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
+  },
+  "dependencies": {
+    "@apollo/client": "^3.14.0",
+    "@reduxjs/toolkit": "^2.2.7",
+    "@vue/apollo-composable": "^4.2.2",
+    "firebase": "^12.2.1",
+    "graphql": "^16.11.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-redux": "^9.2.0",
+    "redux": "^5.0.1",
+    "rxjs": "^7.8.1",
+    "vue": "^3.5.22"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
-    "tsx": "^4.19.2",
-    "typescript": "~5.8.3"
+    "@eslint/js": "^9.33.0",
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.33.0",
+    "gh-pages": "^6.3.0",
+    "globals": "^16.3.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.12",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.39.1",
+    "vite": "^7.1.2",
+    "vue-tsc": "^3.1.0"
   }
 }
