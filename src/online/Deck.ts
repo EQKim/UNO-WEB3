@@ -1,59 +1,78 @@
 import type { Card } from "../cards/Card";
 
-export interface Deck {
-  draw(n: number): Card[];
-  refill(cards: Card[]): void;
-}
+// Functional Programming: Pure functions with immutable data structures
+// No classes, no mutations, only pure transformations
 
-export class StandardDeck implements Deck {
-  private cards: Card[] = [];
+/**
+ * Pure function to create a standard UNO deck
+ * Uses higher-order functions (map, flatMap) and immutability
+ */
+export const createStandardDeck = (): readonly Card[] => {
+  const colors = ["red", "yellow", "green", "blue"] as const;
+  
+  // Use flatMap to create number cards (demonstrates higher-order functions)
+  const numberCards = colors.flatMap(color => [
+    { kind: "number" as const, color, value: 0 } as Card,
+    ...Array.from({ length: 9 }, (_, i) => i + 1).flatMap(value => [
+      { kind: "number" as const, color, value } as Card,
+      { kind: "number" as const, color, value } as Card
+    ])
+  ]);
+  
+  // Use flatMap and Array.from for action cards
+  const actionCards = colors.flatMap(color =>
+    Array.from({ length: 2 }, () => [
+      { kind: "action" as const, color, action: "skip" as const } as Card,
+      { kind: "action" as const, color, action: "reverse" as const } as Card,
+      { kind: "action" as const, color, action: "draw2" as const } as Card
+    ]).flat()
+  );
+  
+  // Use flatMap for wild cards
+  const wildCards = Array.from({ length: 4 }, () => [
+    { kind: "wild" as const, action: "wild" as const } as Card,
+    { kind: "wild" as const, action: "wildDraw4" as const } as Card
+  ]).flat();
+  
+  // Combine all cards immutably and shuffle
+  return shuffle([...numberCards, ...actionCards, ...wildCards]);
+};
 
-  constructor() {
-    this.cards = this.createStandardDeck();
-    this.shuffle();
+/**
+ * Pure function to shuffle an array (Fisher-Yates algorithm)
+ * Returns a new shuffled array without modifying the original
+ */
+export const shuffle = <T>(array: readonly T[]): readonly T[] => {
+  const arr = [...array]; // Create new array (immutability)
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+  return arr;
+};
 
-  private createStandardDeck(): Card[] {
-    const deck: Card[] = [];
-    const colors = ["red", "yellow", "green", "blue"] as const;
-    
-    for (const color of colors) {
-      deck.push({ kind: "number", color, value: 0 } as Card);
-      for (let i = 1; i <= 9; i++) {
-        deck.push({ kind: "number", color, value: i } as Card);
-        deck.push({ kind: "number", color, value: i } as Card);
-      }
-    }
-    
-    for (const color of colors) {
-      for (let i = 0; i < 2; i++) {
-        deck.push({ kind: "action", color, action: "skip" } as Card);
-        deck.push({ kind: "action", color, action: "reverse" } as Card);
-        deck.push({ kind: "action", color, action: "draw2" } as Card);
-      }
-    }
-    
-    for (let i = 0; i < 4; i++) {
-      deck.push({ kind: "wild", action: "wild" } as Card);
-      deck.push({ kind: "wild", action: "wildDraw4" } as Card);
-    }
-    
-    return deck;
-  }
+/**
+ * Pure function to draw cards from a deck
+ * Returns new deck and drawn cards without mutations
+ */
+export const drawFromDeck = (
+  deck: readonly Card[],
+  count: number
+): { readonly newDeck: readonly Card[]; readonly drawnCards: readonly Card[] } => {
+  const actualCount = Math.min(count, deck.length);
+  return {
+    drawnCards: deck.slice(0, actualCount),
+    newDeck: deck.slice(actualCount)
+  };
+};
 
-  private shuffle() {
-    for (let i = this.cards.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
-    }
-  }
-
-  draw(n: number): Card[] {
-    return this.cards.splice(0, Math.min(n, this.cards.length));
-  }
-
-  refill(cards: Card[]): void {
-    this.cards.push(...cards);
-    this.shuffle();
-  }
-}
+/**
+ * Pure function to refill deck with discard pile
+ * Returns new shuffled deck
+ */
+export const refillDeck = (
+  currentDeck: readonly Card[],
+  discardPile: readonly Card[]
+): readonly Card[] => {
+  return shuffle([...currentDeck, ...discardPile]);
+};

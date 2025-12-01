@@ -1,39 +1,83 @@
 import type { Card } from "../cards/Card";
 
-export interface Hand {
-  add(card: Card): void;
-  removeAt(index: number): Card | undefined;
-  getAt(index: number): Card | undefined;
-  cards(): readonly Card[];
-  size(): number;
-  findPlayable(top: Card, predicate: (card: Card) => boolean): number;
-}
+// Functional Programming: Pure functions for hand operations
+// All functions return new arrays without modifying the original
 
-export class PlayerHand implements Hand {
-  private hand: Card[] = [];
+/**
+ * Pure function to add a card to a hand
+ * Returns a new hand array
+ */
+export const addCard = (hand: readonly Card[], card: Card): readonly Card[] => {
+  return [...hand, card];
+};
 
-  add(card: Card): void {
-    this.hand.push(card);
+/**
+ * Pure function to add multiple cards to a hand
+ * Uses reduce to demonstrate higher-order functions
+ */
+export const addCards = (hand: readonly Card[], cards: readonly Card[]): readonly Card[] => {
+  return cards.reduce((acc, card) => addCard(acc, card), hand);
+};
+
+/**
+ * Pure function to remove a card at a specific index
+ * Returns new hand and the removed card (if found)
+ */
+export const removeCardAt = (
+  hand: readonly Card[],
+  index: number
+): { readonly newHand: readonly Card[]; readonly removedCard: Card | undefined } => {
+  if (index < 0 || index >= hand.length) {
+    return { newHand: hand, removedCard: undefined };
   }
+  return {
+    newHand: [...hand.slice(0, index), ...hand.slice(index + 1)],
+    removedCard: hand[index]
+  };
+};
 
-  removeAt(index: number): Card | undefined {
-    if (index < 0 || index >= this.hand.length) return undefined;
-    return this.hand.splice(index, 1)[0];
-  }
+/**
+ * Pure function to get a card at a specific index
+ */
+export const getCardAt = (hand: readonly Card[], index: number): Card | undefined => {
+  return hand[index];
+};
 
-  getAt(index: number): Card | undefined {
-    return this.hand[index];
-  }
+/**
+ * Pure function to find index of first playable card
+ * Uses higher-order function (predicate)
+ */
+export const findPlayableIndex = (
+  hand: readonly Card[],
+  predicate: (card: Card) => boolean
+): number => {
+  return hand.findIndex(predicate);
+};
 
-  cards(): readonly Card[] {
-    return this.hand;
-  }
+/**
+ * Pure function to filter playable cards
+ * Returns array of {card, index} for all playable cards
+ * Demonstrates map + filter composition
+ */
+export const getPlayableCards = (
+  hand: readonly Card[],
+  predicate: (card: Card) => boolean
+): readonly { card: Card; index: number }[] => {
+  return hand
+    .map((card, index) => ({ card, index }))
+    .filter(({ card }) => predicate(card));
+};
 
-  size(): number {
-    return this.hand.length;
-  }
+/**
+ * Pure function to get hand size
+ */
+export const getHandSize = (hand: readonly Card[]): number => {
+  return hand.length;
+};
 
-  findPlayable(top: Card, predicate: (card: Card) => boolean): number {
-    return this.hand.findIndex(predicate);
-  }
-}
+/**
+ * Pure function to check if hand is empty
+ */
+export const isHandEmpty = (hand: readonly Card[]): boolean => {
+  return hand.length === 0;
+};

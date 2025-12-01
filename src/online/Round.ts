@@ -1,22 +1,30 @@
 import type { Card, Color } from "../cards/Card";
 import { matches } from "../cards/Rules";
-import { StandardDeck, Deck } from "./Deck";
-import { PlayerHand, Hand } from "./Hand";
+import { createStandardDeck, drawFromDeck, refillDeck, shuffle } from "./Deck";
+import { addCard, removeCardAt, getCardAt, getHandSize, findPlayableIndex, isHandEmpty } from "./Hand";
 
-export interface PlayerState { id: string; hand: Hand; }
-export interface RoundSnapshot {
-  players: { id: string; handCount: number }[];
-  topCard: Card;
-  currentPlayer: string;
-  direction: 1 | -1;
-  winner?: string;
-  pendingDraw?: number; // accumulated draw2/draw4
-  pendingType?: "draw2" | "draw4" | null;
-  chosenColor?: Color | null; // color locked by last wild
-  chainPlayerId?: string | null; // if set, same player may continue playing same number value
-  chainValue?: number | null; // number being chained
-  pendingTargetId?: string | null; // next player forced to satisfy pending draw
-  history?: HistoryEntry[]; // append-only play/draw/endTurn log
+// Functional Programming: Immutable game state with pure functions
+// No classes, no mutations - all operations return new state
+
+export interface PlayerState {
+  readonly id: string;
+  readonly hand: readonly Card[];
+}
+
+export interface GameState {
+  readonly deck: readonly Card[];
+  readonly discard: readonly Card[];
+  readonly players: readonly PlayerState[];
+  readonly currentIndex: number;
+  readonly direction: 1 | -1;
+  readonly winner?: string;
+  readonly pendingDraw: number;
+  readonly pendingType: "draw2" | "draw4" | null;
+  readonly chosenColor: Color | null;
+  readonly chainPlayerId: string | null;
+  readonly chainValue: number | null;
+  readonly pendingTargetId: string | null;
+  readonly history: readonly HistoryEntry[];
 }
 
 export type HistoryEntry =
@@ -25,261 +33,482 @@ export type HistoryEntry =
   | { kind: "penaltyDraw"; playerId: string; amount: number; reason: "draw2" | "draw4" }
   | { kind: "endTurn"; playerId: string };
 
-export class Round {
-  private deck: Deck;
-  private discard: Card[] = [];
-  private players: PlayerState[] = [];
-  private currentIndex = 0;
-  private direction: 1 | -1 = 1;
-  private winner: string | undefined;
-  private pendingDraw = 0;
-  private pendingType: "draw2" | "draw4" | null = null;
-  private chosenColor: Color | null = null;
-  private chainPlayerId: string | null = null;
-  private chainValue: number | null = null;
-  private pendingTargetId: string | null = null;
-  private history: HistoryEntry[] = [];
+export interface RoundSnapshot {
+  players: { id: string; handCount: number }[];
+  topCard: Card;
+  currentPlayer: string;
+  direction: 1 | -1;
+  winner?: string;
+  pendingDraw?: number;
+  pendingType?: "draw2" | "draw4" | null;
+  chosenColor?: Color | null;
+  chainPlayerId?: string | null;
+  chainValue?: number | null;
+  pendingTargetId?: string | null;
+  history?: readonly HistoryEntry[];
+}
 
-  constructor(playerIds: string[], opts?: { deck?: Deck; deal?: number }) {
-    if (playerIds.length < 2) throw new Error("Need at least 2 players");
-    this.deck = opts?.deck ?? new StandardDeck();
-    this.players = playerIds.map(id => ({ id, hand: new PlayerHand() }));
-    const deal = opts?.deal ?? 7;
-    for (let r = 0; r < deal; r++) this.players.forEach(p => p.hand.add(this.drawOneStrict()));
-    // Flip initial top card (must not be a wild card per official UNO rules)
-    let startCard = this.drawOneStrict();
-    while (startCard.kind === "wild") {
-      // Put wild back and draw another
-      this.deck.refill([startCard]);
-      startCard = this.drawOneStrict();
+/**
+ * Pure function to create initial game state
+ * Uses higher-order functions and immutability
+ */
+export const createInitialState = (
+  playerIds: readonly string[],
+  dealCount: number = 7
+): GameState => {
+  if (playerIds.length < 2) throw new Error("Need at least 2 players");
+
+  let deck = createStandardDeck();
+  
+  // Deal cards to players using reduce (demonstrates higher-order function)
+  const { players, remainingDeck } = playerIds.reduce(
+    (acc, id) => {
+      let playerDeck = acc.remainingDeck;
+      const hand: Card[] = [];
+      
+      // Deal cards to this player
+      for (let i = 0; i < dealCount; i++) {
+        const { drawnCards, newDeck } = drawFromDeck(playerDeck, 1);
+        if (drawnCards.length > 0) {
+          hand.push(drawnCards[0]);
+          playerDeck = newDeck;
+        }
+      }
+      
+      return {
+        players: [...acc.players, { id, hand }],
+        remainingDeck: playerDeck
+      };
+    },
+    { players: [] as PlayerState[], remainingDeck: deck }
+  );
+
+  // Draw initial top card (cannot be wild)
+  let topCard: Card;
+  let finalDeck = remainingDeck;
+  
+  do {
+    const { drawnCards, newDeck } = drawFromDeck(finalDeck, 1);
+    if (drawnCards.length === 0) throw new Error("Deck empty");
+    topCard = drawnCards[0];
+    
+    if (topCard.kind === "wild") {
+      // Put wild back and reshuffle
+      finalDeck = shuffle([...newDeck, topCard]);
+    } else {
+      finalDeck = newDeck;
     }
-    this.discard.push(startCard);
+  } while (topCard.kind === "wild");
+
+  return {
+    deck: finalDeck,
+    discard: [topCard],
+    players,
+    currentIndex: 0,
+    direction: 1,
+    pendingDraw: 0,
+    pendingType: null,
+    chosenColor: null,
+    chainPlayerId: null,
+    chainValue: null,
+    pendingTargetId: null,
+    history: []
+  };
+};
+
+/**
+ * Pure function to get current player
+ * Demonstrates function composition
+ */
+export const getCurrentPlayer = (state: GameState): PlayerState => {
+  return state.players[state.currentIndex];
+};
+
+/**
+ * Pure function to get top card
+ */
+export const getTopCard = (state: GameState): Card => {
+  return state.discard[state.discard.length - 1];
+};
+
+/**
+ * Pure function to get player hand
+ * Uses filter to find player
+ */
+export const getPlayerHand = (state: GameState, playerId: string): readonly Card[] => {
+  const player = state.players.find(p => p.id === playerId);
+  return player ? player.hand : [];
+};
+
+/**
+ * Pure function to create snapshot
+ * Uses map to transform data
+ */
+export const createSnapshot = (state: GameState): RoundSnapshot => {
+  return {
+    players: state.players.map(p => ({ id: p.id, handCount: p.hand.length })),
+    topCard: getTopCard(state),
+    currentPlayer: getCurrentPlayer(state).id,
+    direction: state.direction,
+    winner: state.winner,
+    pendingDraw: state.pendingDraw || undefined,
+    pendingType: state.pendingType,
+    chosenColor: state.chosenColor,
+    chainPlayerId: state.chainPlayerId,
+    chainValue: state.chainValue,
+    pendingTargetId: state.pendingTargetId,
+    history: state.history
+  };
+};
+
+/**
+ * Pure function to advance to next player
+ * Returns new index without mutation
+ */
+const advanceIndex = (state: GameState): number => {
+  return (state.currentIndex + state.direction + state.players.length) % state.players.length;
+};
+
+/**
+ * Pure helper to draw cards with reshuffling
+ * Returns new deck, discard, and drawn cards
+ */
+const drawWithReshuffle = (
+  deck: readonly Card[],
+  discard: readonly Card[],
+  count: number
+): { newDeck: readonly Card[]; newDiscard: readonly Card[]; drawnCards: readonly Card[] } => {
+  if (count <= 0) return { newDeck: deck, newDiscard: discard, drawnCards: [] };
+
+  const { drawnCards, newDeck } = drawFromDeck(deck, count);
+  
+  if (drawnCards.length >= count) {
+    return { newDeck, newDiscard: discard, drawnCards };
   }
 
-  private drawOneStrict(): Card { const d = this.deck.draw(1)[0]; if (!d) throw new Error("Deck empty"); return d; }
+  // Need more cards - reshuffle discard pile
+  const need = count - drawnCards.length;
+  const keepTop = discard[discard.length - 1];
+  const cardsToReshuffle = discard.slice(0, Math.max(0, discard.length - 1));
+  
+  if (cardsToReshuffle.length === 0) {
+    // Nothing to reshuffle
+    return { newDeck, newDiscard: discard, drawnCards };
+  }
 
-  get top(): Card { return this.discard[this.discard.length - 1]; }
-  get current(): PlayerState { return this.players[this.currentIndex]; }
+  const reshuffledDeck = refillDeck(newDeck, cardsToReshuffle);
+  const { drawnCards: additionalCards, newDeck: finalDeck } = drawFromDeck(reshuffledDeck, need);
 
-  snapshot(): RoundSnapshot {
-    return {
-      players: this.players.map(p => ({ id: p.id, handCount: p.hand.size() })),
-      topCard: this.top,
-      currentPlayer: this.current.id,
-      direction: this.direction,
-      winner: this.winner,
-      pendingDraw: this.pendingDraw || undefined,
-      pendingType: this.pendingType,
-      chosenColor: this.chosenColor,
-      chainPlayerId: this.chainPlayerId,
-      chainValue: this.chainValue,
-      pendingTargetId: this.pendingTargetId,
-      history: this.history
+  return {
+    newDeck: finalDeck,
+    newDiscard: [keepTop],
+    drawnCards: [...drawnCards, ...additionalCards]
+  };
+};
+
+/**
+ * Pure function to handle drawing cards
+ * Returns new game state
+ */
+export const drawCards = (
+  state: GameState,
+  playerId: string,
+  count?: number
+): GameState => {
+  if (getCurrentPlayer(state).id !== playerId) {
+    throw new Error("Not your turn");
+  }
+
+  const amount = count ?? (state.pendingDraw > 0 ? state.pendingDraw : 1);
+  const player = getCurrentPlayer(state);
+  
+  const { newDeck, newDiscard, drawnCards } = drawWithReshuffle(state.deck, state.discard, amount);
+  
+  // Add cards to player's hand immutably
+  const updatedPlayers = state.players.map(p =>
+    p.id === playerId
+      ? { ...p, hand: [...p.hand, ...drawnCards] }
+      : p
+  );
+
+  let newState: GameState;
+
+  if (state.pendingDraw > 0) {
+    // Penalty draw - advance turn immediately
+    const historyEntry: HistoryEntry = {
+      kind: "penaltyDraw",
+      playerId,
+      amount: drawnCards.length,
+      reason: state.pendingType!
+    };
+
+    newState = {
+      ...state,
+      deck: newDeck,
+      discard: newDiscard,
+      players: updatedPlayers,
+      currentIndex: advanceIndex(state),
+      pendingDraw: 0,
+      pendingType: null,
+      pendingTargetId: null,
+      chainPlayerId: null,
+      chainValue: null,
+      history: [...state.history, historyEntry]
+    };
+  } else {
+    // Normal draw
+    const historyEntry: HistoryEntry = {
+      kind: "draw",
+      playerId,
+      amount: drawnCards.length
+    };
+
+    newState = {
+      ...state,
+      deck: newDeck,
+      discard: newDiscard,
+      players: updatedPlayers,
+      history: [...state.history, historyEntry]
     };
   }
 
-  // Access a player's current hand cards (read-only reference)
-  getHand(playerId: string): readonly Card[] {
-    const p = this.players.find(pl => pl.id === playerId);
-    return p ? p.hand.cards() : [];
+  return newState;
+};
+
+/**
+ * Pure function to play a card
+ * Returns new game state immutably
+ */
+export const playCard = (
+  state: GameState,
+  playerId: string,
+  handIndex: number,
+  chosenColor?: Color
+): GameState => {
+  if (getCurrentPlayer(state).id !== playerId) {
+    throw new Error("Not your turn");
+  }
+  if (state.winner) {
+    throw new Error("Round finished");
   }
 
-  draw(playerId: string, n?: number) {
-    this.assertTurn(playerId);
-    const amount = n ?? (this.pendingDraw > 0 ? this.pendingDraw : 1);
-    const player = this.players[this.currentIndex];
-    const drawn = this.drawWithReshuffle(amount);
-    drawn.forEach(c => player.hand.add(c));
-    if (this.pendingDraw > 0) {
-      // Record actual drawn count for penalty
-      this.history.push({ kind: "penaltyDraw", playerId, amount: drawn.length, reason: this.pendingType! });
-      this.pendingDraw = 0; this.pendingType = null; this.pendingTargetId = null;
-      // After taking a penalty draw you cannot play; advance turn immediately.
-      this.chainPlayerId = null; this.chainValue = null;
-      this.advanceIndex();
-    } else {
-      // Record actual drawn count
-      this.history.push({ kind: "draw", playerId, amount: drawn.length });
-    }
-    return drawn;
+  const player = getCurrentPlayer(state);
+  const candidate = getCardAt(player.hand, handIndex);
+  
+  if (!candidate) {
+    throw new Error("No card at index");
   }
 
-  play(playerId: string, handIndex: number, chosenColor?: Color) {
-    this.assertTurn(playerId);
-    if (this.winner) throw new Error("Round finished");
-    const ps = this.players[this.currentIndex];
-    const candidate = ps.hand.getAt(handIndex);
-    if (!candidate) throw new Error("No card at index");
-
-    // Validate pending draw stacking
-    if (this.pendingType) {
-      if (!(candidate.kind === "action" && candidate.action === "draw2" && this.pendingType === "draw2") &&
-          !(candidate.kind === "wild" && candidate.action === "wildDraw4" && this.pendingType === "draw4")) {
-        throw new Error("Must satisfy pending draw stack or draw instead");
+  // Validate pending draw stacking
+  if (state.pendingType) {
+    const validDraw2 = candidate.kind === "action" && candidate.action === "draw2" && state.pendingType === "draw2";
+    const validDraw4 = candidate.kind === "wild" && candidate.action === "wildDraw4" && state.pendingType === "draw4";
+    
+    if (!validDraw2 && !validDraw4) {
+      throw new Error("Must satisfy pending draw stack or draw instead");
+    }
+  } else {
+    if (state.chainPlayerId === playerId) {
+      const ok = candidate.kind === "number" && state.chainValue != null && candidate.value === state.chainValue;
+      if (!ok) {
+        throw new Error("Must continue chain with same number or end turn");
       }
     } else {
-      if (this.chainPlayerId === playerId) {
-        // During a number-chain, the only legal play is the same number value; otherwise you must endTurn
-        const ok = (candidate.kind === "number" && this.chainValue != null && candidate.value === this.chainValue);
-        if (!ok) throw new Error("Must continue chain with same number or end turn");
-      } else {
-        if (!matches(this.effectiveTop(), candidate)) {
-          throw new Error("Card does not match top");
-        }
+      if (!matches(getTopCard(state), candidate)) {
+        throw new Error("Card does not match top");
       }
     }
+  }
 
-    // Wild chosen color handling
-    if (candidate.kind === "wild") {
-      if (!chosenColor) throw new Error("Wild requires chosenColor");
-      this.chosenColor = chosenColor;
+  // Validate wild color
+  if (candidate.kind === "wild" && !chosenColor) {
+    throw new Error("Wild requires chosenColor");
+  }
+
+  // Remove card from hand immutably
+  const { newHand, removedCard } = removeCardAt(player.hand, handIndex);
+  if (!removedCard) throw new Error("Failed to remove card");
+
+  const updatedPlayers = state.players.map(p =>
+    p.id === playerId ? { ...p, hand: newHand } : p
+  );
+
+  // Calculate new state based on card played
+  let newPendingDraw = state.pendingDraw;
+  let newPendingType = state.pendingType;
+  let newChosenColor = state.chosenColor;
+  let newDirection = state.direction;
+  let skipNext = false;
+
+  if (removedCard.kind === "wild") {
+    newChosenColor = chosenColor!;
+    if (removedCard.action === "wildDraw4") {
+      newPendingDraw += 4;
+      newPendingType = "draw4";
     } else {
-      this.chosenColor = null; // colored card overrides wild color context
+      newPendingType = null;
     }
+  } else {
+    newChosenColor = null;
+  }
 
-    // Now actually remove the card and finalize state
-    const card = (ps.hand as PlayerHand).removeAt(handIndex)!;
+  if (removedCard.kind === "action") {
+    if (removedCard.action === "draw2") {
+      newPendingDraw += 2;
+      newPendingType = "draw2";
+    }
+    if (removedCard.action === "reverse") {
+      newDirection = state.players.length === 2 ? state.direction : (state.direction === 1 ? -1 : 1);
+    }
+    if (removedCard.action === "skip") {
+      skipNext = true;
+    }
+  }
 
+  // Add card to discard pile
+  const cardToDiscard = removedCard.kind === "wild" 
+    ? { ...removedCard, chosenColor } as Card
+    : removedCard;
+
+  let newState: GameState = {
+    ...state,
+    players: updatedPlayers,
+    discard: [...state.discard, cardToDiscard],
+    pendingDraw: newPendingDraw,
+    pendingType: newPendingType,
+    chosenColor: newChosenColor,
+    direction: newDirection,
+    history: [...state.history, { kind: "play", playerId, card: removedCard, chosenColor }]
+  };
+
+  // Check win condition
+  if (isHandEmpty(newHand)) {
+    return { ...newState, winner: playerId };
+  }
+
+  // Handle turn advancement and chaining
+  let newChainPlayerId = state.chainPlayerId;
+  let newChainValue = state.chainValue;
+  let newCurrentIndex = state.currentIndex;
+  let newPendingTargetId = state.pendingTargetId;
+
+  if (skipNext) {
+    newCurrentIndex = advanceIndex(newState);
+    newChainPlayerId = null;
+    newChainValue = null;
+  } else if (!newPendingType && removedCard.kind === "number") {
+    if (state.chainPlayerId === playerId && state.chainValue === removedCard.value) {
+      // Continue chain - keep turn
+    } else if (state.chainPlayerId == null) {
+      // Start new chain
+      newChainPlayerId = playerId;
+      newChainValue = removedCard.value;
+    } else {
+      // Chain broken
+      newChainPlayerId = null;
+      newChainValue = null;
+      newCurrentIndex = advanceIndex(newState);
+    }
+  } else {
+    // Non-number or pending draw breaks chain
+    newChainPlayerId = null;
+    newChainValue = null;
+    newCurrentIndex = advanceIndex(newState);
+  }
+
+  if (newPendingType && newChainPlayerId == null) {
+    newPendingTargetId = newState.players[newCurrentIndex].id;
+  }
+
+  return {
+    ...newState,
+    currentIndex: newCurrentIndex,
+    chainPlayerId: newChainPlayerId,
+    chainValue: newChainValue,
+    pendingTargetId: newPendingTargetId
+  };
+};
+
+/**
+ * Pure function to end turn
+ * Returns new game state
+ */
+export const endTurn = (state: GameState, playerId: string): GameState => {
+  if (getCurrentPlayer(state).id !== playerId) {
+    throw new Error("Not your turn");
+  }
+  if (state.chainPlayerId !== playerId) {
+    throw new Error("Cannot end turn now");
+  }
+
+  return {
+    ...state,
+    currentIndex: advanceIndex(state),
+    chainPlayerId: null,
+    chainValue: null,
+    history: [...state.history, { kind: "endTurn", playerId }]
+  };
+};
+
+/**
+ * Pure function to draw and maybe auto-play
+ * Demonstrates complex function composition
+ */
+export const drawAndMaybePlay = (
+  state: GameState,
+  playerId: string
+): { newState: GameState; drawn: readonly Card[]; played: boolean } => {
+  const prePending = state.pendingDraw;
+  const stateAfterDraw = drawCards(state, playerId, undefined);
+  
+  const drawnCards = stateAfterDraw.history
+    .slice(-1)[0]?.kind === "draw" || stateAfterDraw.history.slice(-1)[0]?.kind === "penaltyDraw"
+    ? (stateAfterDraw.history.slice(-1)[0] as any).amount
+    : 0;
+
+  if (prePending > 0) {
+    return { newState: stateAfterDraw, drawn: [], played: false };
+  }
+
+  // Find playable card using higher-order function
+  const currentPlayer = getCurrentPlayer(stateAfterDraw);
+  const topCard = getTopCard(stateAfterDraw);
+  
+  const playableIndex = findPlayableIndex(currentPlayer.hand, (c: Card) => {
+    if (stateAfterDraw.chainPlayerId === playerId) {
+      return c.kind === "number" && stateAfterDraw.chainValue != null && c.value === stateAfterDraw.chainValue;
+    }
+    return matches(topCard, c);
+  });
+
+  if (playableIndex >= 0) {
+    const card = getCardAt(currentPlayer.hand, playableIndex)!;
+    
     if (card.kind === "wild") {
-      (card as any).chosenColor = chosenColor!;
-      if (card.action === "wildDraw4") {
-        this.pendingDraw += 4;
-        this.pendingType = "draw4";
-      } else {
-        this.pendingType = null; // plain wild resets type
-      }
-    }
+      // Choose color heuristically using reduce
+      const counts = currentPlayer.hand
+        .filter((c): c is Exclude<Card, { kind: "wild" }> => c.kind !== "wild")
+        .reduce((acc, c) => {
+          acc[c.color] = (acc[c.color] || 0) + 1;
+          return acc;
+        }, {} as Record<Color, number>);
 
-    if (card.kind === "action") {
-      if (card.action === "draw2") { this.pendingDraw += 2; this.pendingType = "draw2"; }
-      if (card.action === "reverse") { this.direction = (this.players.length === 2) ? this.direction : (this.direction === 1 ? -1 : 1); }
-      if (card.action === "skip") { this.advanceIndex(); }
-    }
-
-  this.discard.push(card);
-  this.history.push({ kind: "play", playerId, card, chosenColor });
-
-    // Win condition
-    if (ps.hand.size() === 0) {
-      this.winner = ps.id;
-      return;
-    }
-
-    if (!this.pendingType && card.kind === "number") {
-      if (this.chainPlayerId === playerId && this.chainValue === card.value) {
-        // continue chain; keep turn
-      } else if (this.chainPlayerId == null) {
-        // start new chain
-        this.chainPlayerId = playerId;
-        this.chainValue = card.value;
-      } else {
-        // chain broken (different value or different player)
-        this.chainPlayerId = null;
-        this.chainValue = null;
-        this.advanceIndex();
-      }
+      const chosen = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] as Color) || "red";
+      const finalState = playCard(stateAfterDraw, playerId, playableIndex, chosen);
+      return { newState: finalState, drawn: [], played: true };
     } else {
-      // non-number or pending draw state breaks/doesn't start chain
-      this.chainPlayerId = null;
-      this.chainValue = null;
-      this.advanceIndex();
-    }
-    if (this.pendingType && this.chainPlayerId == null) {
-      this.pendingTargetId = this.current.id; // next player must respond
+      const finalState = playCard(stateAfterDraw, playerId, playableIndex);
+      return { newState: finalState, drawn: [], played: true };
     }
   }
 
-  private effectiveTop(): Card {
-    return this.top;
-  }
+  // Cannot play - advance turn
+  const finalState = {
+    ...stateAfterDraw,
+    currentIndex: advanceIndex(stateAfterDraw),
+    chainPlayerId: null,
+    chainValue: null
+  };
 
-  private advanceIndex() {
-    this.currentIndex = (this.currentIndex + this.direction + this.players.length) % this.players.length;
-  }
-
-  private assertTurn(playerId: string) {
-    if (this.current.id !== playerId) throw new Error("Not your turn");
-  }
-
-  endTurn(playerId: string) {
-    this.assertTurn(playerId);
-    // Only allow ending turn when voluntarily stopping an active number-chain for this player
-    if (this.chainPlayerId !== playerId) {
-      throw new Error("Cannot end turn now");
-    }
-    this.chainPlayerId = null;
-    this.chainValue = null;
-    this.history.push({ kind: "endTurn", playerId });
-    this.advanceIndex();
-  }
-
-  drawAndMaybePlay(playerId: string): { drawn: Card[]; played: boolean } {
-    const prePending = this.pendingDraw;
-    const drawn = this.draw(playerId, undefined);
-    if (prePending > 0) return { drawn, played: false };
-    // If we could not draw exactly one (e.g., deck exhaustion), break chain and advance
-    if (drawn.length !== 1) {
-      this.chainPlayerId = null;
-      this.chainValue = null;
-      this.advanceIndex();
-      return { drawn, played: false };
-    }
-    const idx = this.current.hand.findPlayable(this.top, (c: Card) => {
-      if (this.chainPlayerId === playerId) {
-        return c.kind === "number" && this.chainValue != null && c.value === this.chainValue;
-      }
-      return matches(this.effectiveTop(), c);
-    });
-    if (idx >= 0) {
-      const card = this.current.hand.getAt(idx)!;
-      if (card.kind === "wild") {
-        // Choose color heuristically: most frequent color in current hand excluding wilds.
-        const counts: Record<Color, number> = { red: 0, yellow: 0, green: 0, blue: 0 };
-        for (const c of this.current.hand.cards()) if (c.kind !== "wild") counts[c.color as Color]++;
-        const chosen = (Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]?.[0] as Color) || "red";
-        this.play(playerId, idx, chosen);
-      } else {
-        this.play(playerId, idx);
-      }
-      return { drawn, played: true };
-    }
-    // Could not play after drawing one card; advance turn automatically.
-    this.chainPlayerId = null;
-    this.chainValue = null;
-    this.advanceIndex();
-    return { drawn, played: false };
-  }
-
-  // Try to draw 'count' cards, reshuffling the discard pile (except the top card)
-  // back into the deck if needed. Returns as many as could be drawn.
-  private drawWithReshuffle(count: number): Card[] {
-    if (count <= 0) return [];
-    const out: Card[] = [];
-    let need = count;
-    while (need > 0) {
-      const got = this.deck.draw(need);
-      out.push(...got);
-      need -= got.length;
-      if (need <= 0) break;
-      // Not enough cards: attempt to reshuffle discards (keep the current top)
-      const keepTop = this.discard[this.discard.length - 1];
-      const refill = this.discard.slice(0, Math.max(0, this.discard.length - 1));
-      if (refill.length === 0) break; // nothing to reshuffle
-      // Clear discard except for top
-      this.discard = [keepTop];
-      // Refill deck with shuffled discards
-      this.deck.refill(shuffleCopy(refill));
-    }
-    return out;
-  }
-}
-
-// Simple non-mutating shuffle helper for arrays
-function shuffleCopy<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+  return { newState: finalState, drawn: [], played: false };
+};
