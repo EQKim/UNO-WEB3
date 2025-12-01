@@ -1,83 +1,127 @@
-# UNO Web3 – Assignment 5 Conversion
+# UNO Web3 – Assignment 1: Core TypeScript Implementation
 
-This branch implements the assignment requirements of converting the previous Vue client into a Redux + RxJS powered architecture while retaining existing UNO gameplay features.
+This branch implements the foundational TypeScript types and game logic for UNO without any UI framework.
 
-## ✅ Requirements Implemented
+## ✅ Assignment 1 Requirements
 
-Must have:
-- Functional model: existing server/game logic retained (top card, stacking, chaining, wild color choice).
-- Retained features from assignments 1–3 (drawing, playing, stacking +2/+4, number chaining, wild color picker, win state).
-- Redux for state management (`src/store/*`).
-- RxJS for handling messages from the server (Firestore snapshots wrapped as Observables in `streams.ts`).
+**Must Have:**
+- ✅ Object-oriented implementation (Card, Deck, Hand, Round classes)
+- ✅ Card type with number cards, colored action cards, and wild cards
+- ✅ Deck interface representing a full UNO deck
+- ✅ Hand interface for player hands
+- ✅ Round interface for playing one round of UNO
+- ✅ Complete UNO rule implementation
 
-Should have:
-- React recommended – currently still using Vue for rendering; Redux + RxJS integrated. (React layer can be added in `react/` folder later.)
+**Should Have:**
+- ⚠️ "UNO" call rules (not implemented)
+
+**Could Have:**
+- ⚠️ Full game with scoring across multiple rounds (only single round implemented)
 
 ## Architecture Overview
 
 ```
-Firebase (rooms / players / hands docs)
-        │ snapshots
-        ▼
-RxJS Observables (roomObservable / playersObservable / myHandObservable)
-        │ next/error
-        ▼
-Redux store (gameSlice reducers update unified state)
-        │ selector wrapper (Vue bridge)
-        ▼
-OnlineBoard.vue (UI reads store via useSelector)
-        │ user actions
-        ▼
-GraphQL mutations (playCardOnline / drawOneOnline / endTurnOnline)
+src/cards/
+  Card.ts       → Type definitions (NumberCard, ActionCard, WildCard)
+  Rules.ts      → Card matching logic
+
+src/offline/
+  Deck.ts       → Deck interface & StandardDeck implementation
+  Hand.ts       → Hand interface & PlayerHand implementation
+  Round.ts      → Round class with full game logic
+  demo.ts       → CLI demo that simulates a game
+  index.ts      → Barrel exports
 ```
 
-## Key Files
-- `src/store/types.ts` – Shared state types.
-- `src/store/gameSlice.ts` – Redux slice for UNO state.
-- `src/store/store.ts` – Configured Redux store.
-- `src/store/streams.ts` – RxJS Observables wrapping Firestore snapshots.
-- `src/store/vue.ts` – Lightweight Vue hooks (`useSelector`, `useDispatch`) bridging to Redux.
-- `src/services/OnlineBoard.vue` – Refactored to rely on Redux + RxJS instead of direct Firestore subscription.
-- `src/services/OnlineGame.ts` – GraphQL mutation helpers.
+## Key Features
+
+**Card Types:**
+- Number cards (0-9 in 4 colors)
+- Action cards (Skip, Reverse, Draw 2)
+- Wild cards (Wild, Wild Draw 4)
+
+**Game Rules Implemented:**
+- ✅ Card matching by color or value
+- ✅ Wild cards always playable
+- ✅ Draw 2 and Draw 4 stacking
+- ✅ Number chaining (play multiple cards of same number)
+- ✅ Skip, Reverse effects
+- ✅ Direction changes
+- ✅ Win detection
+- ✅ Turn management
+- ✅ Deck reshuffling when empty
 
 ## How to Run
 
 ```powershell
 npm install
+
+# Run a simulated game (no UI)
 npm run dev
+
+# Run with full history log
+npm run dev:history
+
+# Run with verbose turn-by-turn output
+npm run dev:verbose
+
+# Type checking
+npm run typecheck
 ```
-Visit local dev server (default: http://localhost:5173/UNO-WEB3/ if base applied) and create/join a room.
 
-## Building & Deploying
+## Demo Output
 
+The demo simulates a 4-player game (Kim, Bob, Ada, Lee) and shows:
+- Turn-by-turn actions (play, draw, penalty draws)
+- Top card changes
+- Pending penalties and chains
+- Final winner
+
+**Example:**
+```
+[Turn 1] Actor=Kim | Action=PLAY Kim blue 5 | Top=red 3->blue 5 | Next=Bob
+[Turn 2] Actor=Bob | Action=DRAW Bob x1 | Top=blue 5->blue 5 | Next=Ada
+...
+Winner: Ada after 187 turns
+```
+
+## Implementation Notes
+
+**Type Safety:**
+- Discriminated unions for Card types
+- Readonly interfaces for immutable snapshots
+- Strict TypeScript configuration
+
+**Game Logic:**
+- All rules in `Round.ts` class
+- Immutable snapshots prevent external state mutation
+- History log tracks all actions
+- Automatic turn advancement
+- Chain management for number sequences
+
+**Bug Fixes Applied:**
+- ✅ Skip cards now correctly skip one player (was skipping two)
+- ✅ Wild cards cannot be starting card
+- ✅ Action cards at start don't trigger effects
+
+## Testing
+
+Run the demo with verbose flag to verify game rules:
 ```powershell
-npm run build
-npm run deploy   # publishes dist/ to gh-pages branch
+npm run dev:verbose
 ```
 
-## Adding React (Next Step)
-1. Install React dependencies:
-   ```powershell
-   npm install react react-dom @types/react @types/react-dom
-   ```
-2. Create `src/react/App.tsx` that uses the same selectors (wrap store with `<Provider>` using `react-redux`).
-3. Add a React entry point (`react-main.tsx`) alongside current Vue entry, or switch entirely.
-4. Gradually port Vue components.
+Watch for:
+- Correct turn order (clockwise, or counter-clockwise after Reverse)
+- Skip cards skipping exactly one player
+- Draw 2/Draw 4 stacking correctly
+- Number chaining working (multiple cards of same number)
+- Win detection when a player runs out of cards
 
-## Functional Model Notes
-Current functional server/game model (top card logic, wild color handling, draw stacking, number chaining) remains intact through existing services and `matches` rule. Refactor opportunities: extract pure functions (e.g., `canPlay`, `resolveStack`) into a `model/` directory for reuse in React version.
+## Next Steps (Assignment 2+)
 
-## Verification
-- Build succeeded (`npm run build`).
-- New bundle hash appears each deploy due to injected `__BUILD_TIME__`.
-- Gameplay interactions still work via Redux + RxJS pipeline (draw, play, stack).
-
-## Future Enhancements
-- Full React UI.
-- Unit tests for pure card/stacking logic.
-- Better chunk splitting (current JS bundle ~700kB).
-- Error boundary component for network failures.
-
-## License
-Internal coursework project – no production use implied.
+- Assignment 2: Add Vue UI and bot players
+- Assignment 3: Add online multiplayer with Firebase
+- Assignment 4: Functional programming patterns
+- Assignment 5: Redux + RxJS architecture
 
