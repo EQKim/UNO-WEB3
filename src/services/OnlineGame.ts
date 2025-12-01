@@ -1,6 +1,5 @@
 // src/services/OnlineGame.ts
-import { onSnapshot, doc, collection } from "firebase/firestore";
-import { auth, db, ensureAnonAuth } from "../firebase";
+import { auth, ensureAnonAuth } from "../firebase";
 import type { Card } from "../cards/Card";
 
 /**
@@ -39,39 +38,7 @@ async function gql<T>(
   return json.data as T;
 }
 
-/* -------------------- subscriptions (unchanged, still Firestore) -------------------- */
-export function subscribeOnlineGame(
-  roomId: string,
-  handlers: {
-    onRoom: (room: any) => void;
-    onPlayers: (players: any[]) => void;
-    onMyHand: (hand: Card[]) => void;
-  }
-) {
-  const unsubRoom = onSnapshot(doc(db, "rooms", roomId), (s) =>
-    handlers.onRoom({ id: s.id, ...s.data() })
-  );
-
-  const unsubPlayers = onSnapshot(
-    collection(db, "rooms", roomId, "players"),
-    (s) => handlers.onPlayers(s.docs.map((d) => ({ id: d.id, ...d.data() })))
-  );
-
-  const myId = auth.currentUser?.uid;
-  const unsubHand = myId
-    ? onSnapshot(doc(db, "rooms", roomId, "hands", myId), (s) =>
-        handlers.onMyHand((s.data()?.cards ?? []) as Card[])
-      )
-    : () => {};
-
-  return () => {
-    unsubRoom();
-    unsubPlayers();
-    unsubHand();
-  };
-}
-
-/* -------------------- mutations (now go through GraphQL) -------------------- */
+/* -------------------- GraphQL mutations -------------------- */
 
 export async function startGameClient(roomId: string) {
   type R = { startGame: boolean };

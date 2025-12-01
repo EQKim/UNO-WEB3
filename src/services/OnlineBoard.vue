@@ -184,42 +184,37 @@ import {
   startGameClient,
   playCardOnline,
   drawOneOnline,
-  endTurnOnline,
-  subscribeOnlineGame
+  endTurnOnline
 } from "./OnlineGame";
 import { matches } from "../cards/Rules";
 import { auth } from "../firebase";
+import { useSelector } from "../store/vue";
+import { startListeningToRoom } from "../store/streams";
+import type { RootState } from "../store/store";
 
 type Props = { roomId: string; isHost: boolean };
 const { roomId, isHost } = defineProps<Props>();
 
-// Local reactive state instead of Redux
-const room = ref<any | null>(null);
-const players = ref<any[]>([]);
-const myHand = ref<Card[]>([]);
+// Redux state via useSelector (Assignment 5 requirement)
+const room = useSelector((state: RootState) => state.game.room);
+const players = useSelector((state: RootState) => state.game.players);
+const myHand = useSelector((state: RootState) => state.game.myHand);
+
+// Local UI state (not domain state)
 const pendingWild = ref<{ index: number; card: Card } | null>(null);
 const hasDrawnThisTurn = ref(false);
 
 let unsubscribe: (() => void) | null = null;
 
 onMounted(() => {
-  unsubscribe = subscribeOnlineGame(roomId, {
-    onRoom: (r) => {
-      const wasMyTurn = room.value?.currentTurn === myUid.value;
-      const isNowMyTurn = r?.currentTurn === myUid.value;
-      if (!wasMyTurn && isNowMyTurn) {
-        hasDrawnThisTurn.value = false;
-      }
-      room.value = r;
-    },
-    onPlayers: (ps) => (players.value = ps),
-    onMyHand: (hand) => (myHand.value = hand)
-  });
+  // RxJS streams handling Firestore snapshots (Assignment 5 requirement)
+  unsubscribe = startListeningToRoom(roomId);
 });
 
 onUnmounted(() => {
   if (unsubscribe) unsubscribe();
 });
+
 
 const top = computed<Card | null>(() => room.value?.topCard ?? null);
 const myUid = computed(() => auth.currentUser?.uid ?? null);
@@ -275,6 +270,7 @@ const topChosenColor = computed<"red" | "yellow" | "green" | "blue" | null>(() =
   const t = top.value as any;
   return t && t.kind === "wild" ? (t.chosenColor ?? null) : null;
 });
+
 
 async function playChosenWild(color: "red" | "yellow" | "green" | "blue") {
   const pw = pendingWild.value;
