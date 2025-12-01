@@ -1,44 +1,45 @@
-# UNO Web3 – Assignment 5 Conversion
+# UNO Web3 – Assignment 2: Browser-only UNO against Bots
 
-This branch implements the assignment requirements of converting the previous Vue client into a Redux + RxJS powered architecture while retaining existing UNO gameplay features.
+This branch implements a browser-based UNO game where you can play against 1-3 computer opponents (bots).
 
 ## ✅ Requirements Implemented
 
 Must have:
-- Functional model: existing server/game logic retained (top card, stacking, chaining, wild color choice).
-- Retained features from assignments 1–3 (drawing, playing, stacking +2/+4, number chaining, wild color picker, win state).
-- Redux for state management (`src/store/*`).
-- RxJS for handling messages from the server (Firestore snapshots wrapped as Observables in `streams.ts`).
+- ✅ Play one round of UNO against 1-3 bots
+- ✅ Bots play according to official UNO rules
+- ✅ Bots can be smart or simple (currently simple AI)
+- ✅ Screen for setting up a game (configure number of bots)
+- ✅ Screen for playing the game
+- ✅ Implemented in Vue.js (Composition API)
 
 Should have:
-- React recommended – currently still using Vue for rendering; Redux + RxJS integrated. (React layer can be added in `react/` folder later.)
+- ✅ Bots sometimes forget to say UNO (not implemented)
+- ✅ Bots sometimes forget to catch when another player forgets (not implemented)
+- ✅ Game over screen indicating the result
 
 ## Architecture Overview
 
 ```
-Firebase (rooms / players / hands docs)
-        │ snapshots
+Vue.js App (src/App.vue)
+        │
         ▼
-RxJS Observables (roomObservable / playersObservable / myHandObservable)
-        │ next/error
+Round class (src/offline/Round.ts)
+        │ manages game state
+        ├─ Deck (src/offline/Deck.ts)
+        ├─ Hand (src/offline/Hand.ts)
+        └─ Card matching rules (src/cards/Rules.ts)
+        │
         ▼
-Redux store (gameSlice reducers update unified state)
-        │ selector wrapper (Vue bridge)
-        ▼
-OnlineBoard.vue (UI reads store via useSelector)
-        │ user actions
-        ▼
-GraphQL mutations (playCardOnline / drawOneOnline / endTurnOnline)
+Bot AI (chooseForAI in Rules.ts)
 ```
 
 ## Key Files
-- `src/store/types.ts` – Shared state types.
-- `src/store/gameSlice.ts` – Redux slice for UNO state.
-- `src/store/store.ts` – Configured Redux store.
-- `src/store/streams.ts` – RxJS Observables wrapping Firestore snapshots.
-- `src/store/vue.ts` – Lightweight Vue hooks (`useSelector`, `useDispatch`) bridging to Redux.
-- `src/services/OnlineBoard.vue` – Refactored to rely on Redux + RxJS instead of direct Firestore subscription.
-- `src/services/OnlineGame.ts` – GraphQL mutation helpers.
+- `src/App.vue` – Main game component with UI and game loop
+- `src/offline/Round.ts` – Core game logic (turns, drawing, playing cards)
+- `src/offline/Deck.ts` – Deck creation and shuffling
+- `src/offline/Hand.ts` – Hand management utilities
+- `src/cards/Card.ts` – Card type definitions
+- `src/cards/Rules.ts` – Card matching rules and simple bot AI
 
 ## How to Run
 
@@ -46,7 +47,24 @@ GraphQL mutations (playCardOnline / drawOneOnline / endTurnOnline)
 npm install
 npm run dev
 ```
-Visit local dev server (default: http://localhost:5173/UNO-WEB3/ if base applied) and create/join a room.
+Visit http://localhost:5173/ and configure the number of bots to play against.
+
+## Game Features
+
+### Official UNO Rules Implemented:
+- ✅ Number cards: Match by color or number
+- ✅ Skip cards: Skip next player's turn
+- ✅ Reverse cards: Reverse play direction
+- ✅ Draw 2 cards: Next player draws 2 (can stack)
+- ✅ Wild cards: Change color
+- ✅ Wild Draw 4: Change color and next player draws 4 (can stack)
+- ✅ Number chaining: Play multiple cards of same number on your turn
+- ✅ Win detection: First player to empty their hand wins
+
+### Bot AI:
+- Simple strategy: Play first valid card from hand
+- If no valid cards, draw from deck
+- Automatically chooses color for wild cards (picks most common color in hand)
 
 ## Building & Deploying
 
@@ -55,29 +73,14 @@ npm run build
 npm run deploy   # publishes dist/ to gh-pages branch
 ```
 
-## Adding React (Next Step)
-1. Install React dependencies:
-   ```powershell
-   npm install react react-dom @types/react @types/react-dom
-   ```
-2. Create `src/react/App.tsx` that uses the same selectors (wrap store with `<Provider>` using `react-redux`).
-3. Add a React entry point (`react-main.tsx`) alongside current Vue entry, or switch entirely.
-4. Gradually port Vue components.
-
-## Functional Model Notes
-Current functional server/game model (top card logic, wild color handling, draw stacking, number chaining) remains intact through existing services and `matches` rule. Refactor opportunities: extract pure functions (e.g., `canPlay`, `resolveStack`) into a `model/` directory for reuse in React version.
-
-## Verification
-- Build succeeded (`npm run build`).
-- New bundle hash appears each deploy due to injected `__BUILD_TIME__`.
-- Gameplay interactions still work via Redux + RxJS pipeline (draw, play, stack).
-
 ## Future Enhancements
-- Full React UI.
-- Unit tests for pure card/stacking logic.
-- Better chunk splitting (current JS bundle ~700kB).
-- Error boundary component for network failures.
+- Smarter bot AI (strategic play)
+- Bot "UNO" calling logic
+- Sound effects
+- Animations for card plays
+- Score tracking across multiple rounds
 
 ## License
 Internal coursework project – no production use implied.
+
 

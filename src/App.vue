@@ -44,21 +44,24 @@
           </div>
         </div>
         <button @click="drawCard" 
-                :disabled="hasPlayableCard && !isPenaltyDraw" 
+                :disabled="(hasPlayableCard && !isPenaltyDraw) || (snapshot && snapshot.chainPlayerId === 'You') || drawnCardIndex !== null" 
                 :class="{ 'penalty-draw-button': isPenaltyDraw }"
                 :style="{ 
                   padding: '.5rem 1rem', 
-                  background: (hasPlayableCard && !isPenaltyDraw) ? '#9ca3af' : (isPenaltyDraw ? '#dc2626' : '#3b82f6'), 
+                  background: ((hasPlayableCard && !isPenaltyDraw) || (snapshot && snapshot.chainPlayerId === 'You') || drawnCardIndex !== null) ? '#9ca3af' : (isPenaltyDraw ? '#dc2626' : '#3b82f6'), 
                   color: '#fff', 
                   border: 'none', 
                   borderRadius: '4px', 
-                  cursor: (hasPlayableCard && !isPenaltyDraw) ? 'not-allowed' : 'pointer', 
+                  cursor: ((hasPlayableCard && !isPenaltyDraw) || (snapshot && snapshot.chainPlayerId === 'You') || drawnCardIndex !== null) ? 'not-allowed' : 'pointer', 
                   fontWeight: 'bold' 
                 }">
           {{ drawButtonText }}
         </button>
         <button v-if="snapshot.chainPlayerId === 'You'" @click="endTurn" style="padding: .5rem 1rem; background: #f59e0b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-left: .5rem;">
-          End Turn
+          End Turn (Chain)
+        </button>
+        <button v-if="drawnCardIndex !== null" @click="passTurn" style="padding: .5rem 1rem; background: #ef4444; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-left: .5rem;">
+          Pass
         </button>
       </div>
 
@@ -238,6 +241,7 @@ export default {
       if (!round.value || snapshot.value?.currentPlayer !== "You") return;
       const currentRound = round.value as Round;
       const wasDrawnCard = drawnCardIndex.value === idx;
+      
       if (card.kind === "wild") {
         pendingCardIndex.value = idx;
         showColorPicker.value = true;
@@ -247,23 +251,32 @@ export default {
           snapshot.value = currentRound.snapshot();
           drawnCardIndex.value = null;
           
-          // If this was a drawn card, force end turn (can't chain with drawn cards)
-          if (wasDrawnCard) {
-            // Break any chain that was started
+          // After playing, check if turn is still ours (chaining) or advanced to next player
+          if (snapshot.value.currentPlayer !== "You") {
+            // Turn advanced - start bot loop
+            if (!snapshot.value.winner) {
+              setTimeout(() => botsLoop(currentRound), 300);
+            }
+          } else if (wasDrawnCard) {
+            // If we played a drawn card and still our turn (chain started), 
+            // we must end turn manually - can't play more cards
+            // Actually, playing drawn card should auto-advance. Let's force end turn:
             if (snapshot.value.chainPlayerId === "You") {
               try {
                 currentRound.endTurn("You");
                 snapshot.value = currentRound.snapshot();
+                if (!snapshot.value.winner && snapshot.value.currentPlayer !== "You") {
+                  setTimeout(() => botsLoop(currentRound), 300);
+                }
               } catch {
-                // Already advanced, that's fine
+                // If can't end turn, then proceed to bots anyway
+                if (!snapshot.value.winner && snapshot.value.currentPlayer !== "You") {
+                  setTimeout(() => botsLoop(currentRound), 300);
+                }
               }
             }
-            if (!snapshot.value.winner) {
-              setTimeout(() => botsLoop(currentRound), 300);
-            }
-          } else if (!snapshot.value.winner) {
-            setTimeout(() => botsLoop(currentRound), 300);
           }
+          // else: chain started with regular card - stay on our turn, don't start bots
         } catch (e: any) {
           alert(`Cannot play that card: ${e.message}`);
         }
@@ -274,6 +287,7 @@ export default {
       if (!round.value || pendingCardIndex.value === null) return;
       const currentRound = round.value as Round;
       const wasDrawnCard = drawnCardIndex.value === pendingCardIndex.value;
+      
       try {
         currentRound.play("You", pendingCardIndex.value, color);
         snapshot.value = currentRound.snapshot();
@@ -281,23 +295,14 @@ export default {
         pendingCardIndex.value = null;
         drawnCardIndex.value = null;
         
-        // If this was a drawn wild card, force end turn (can't chain with drawn cards)
-        if (wasDrawnCard) {
-          // Wild cards don't start chains, but break them if active
-          if (snapshot.value.chainPlayerId === "You") {
-            try {
-              currentRound.endTurn("You");
-              snapshot.value = currentRound.snapshot();
-            } catch {
-              // Already advanced
-            }
-          }
+        // Check if turn advanced or stayed (wild cards usually advance)
+        if (snapshot.value.currentPlayer !== "You") {
+          // Turn advanced - start bot loop
           if (!snapshot.value.winner) {
             setTimeout(() => botsLoop(currentRound), 300);
           }
-        } else if (!snapshot.value.winner) {
-          setTimeout(() => botsLoop(currentRound), 300);
         }
+        // Wild cards don't create chains, so no need to check chain status
       } catch (e: any) {
         alert(`Cannot play that card: ${e.message}`);
         showColorPicker.value = false;
@@ -308,26 +313,54 @@ export default {
     function drawCard() {
       if (!round.value || snapshot.value?.currentPlayer !== "You") return;
       const currentRound = round.value as Round;
-      const handSizeBefore = round.value.getHand("You").length;
       const wasPenalty = snapshot.value.pendingDraw && snapshot.value.pendingDraw > 0;
+      
       try {
-        currentRound.draw("You");
-        snapshot.value = currentRound.snapshot();
-        const handSizeAfter = round.value.getHand("You").length;
-        
-        // If it was a penalty draw, turn already advanced - start bots
         if (wasPenalty) {
+          // Penalty draw - just draw the cards, turn auto-advances
+          currentRound.draw("You");
+          snapshot.value = currentRound.snapshot();
+          
           if (!snapshot.value.winner && snapshot.value.currentPlayer !== "You") {
             setTimeout(() => botsLoop(currentRound), 300);
           }
         } else {
-          // Highlight the drawn card (it's the last one in hand) for normal draws
+          // Normal draw - highlight the card briefly, then it can be played or turn ends
+          const handSizeBefore = currentRound.getHand("You").length;
+          currentRound.draw("You");
+          snapshot.value = currentRound.snapshot();
+          const handSizeAfter = currentRound.getHand("You").length;
+          
+          // Highlight the drawn card
           if (handSizeAfter > handSizeBefore) {
             drawnCardIndex.value = handSizeAfter - 1;
           }
+          
+          // After drawing, player can ONLY play the drawn card or pass
+          // The drawn card is already highlighted - wait for player action
+          // Note: Player can only click the drawn card or the turn will timeout/they must pass manually
         }
       } catch (e: any) {
         alert(`Error drawing: ${e.message}`);
+      }
+    }
+
+    function passTurn() {
+      if (!round.value || snapshot.value?.currentPlayer !== "You") return;
+      const currentRound = round.value as Round;
+      
+      // Player drew a card and chooses not to play it (or can't play it)
+      drawnCardIndex.value = null;
+      
+      try {
+        currentRound.pass("You");
+        snapshot.value = currentRound.snapshot();
+        
+        if (!snapshot.value.winner && snapshot.value.currentPlayer !== "You") {
+          setTimeout(() => botsLoop(currentRound), 300);
+        }
+      } catch (e: any) {
+        alert(`Error passing: ${e.message}`);
       }
     }
 
@@ -351,28 +384,57 @@ export default {
       let snap = r.snapshot();
       snapshot.value = snap;
       while (!loopCancel && !snap.winner && snap.currentPlayer !== "You") {
-        await sleep(400);
+        await sleep(2000);
         const pid = snap.currentPlayer;
         const hand = r.getHand(pid);
-        const choice = chooseForAI([...hand], snap.topCard);
-        try {
-          if (choice === "draw") {
-            r.drawAndMaybePlay(pid);
-          } else {
-            const idx = hand.findIndex(c => c === choice);
-            if (idx >= 0) {
-              if (choice.kind === "wild") {
-                r.play(pid, idx, pickColor(hand));
-              } else {
-                r.play(pid, idx);
-              }
-            } else {
-              r.drawAndMaybePlay(pid);
+        
+        // Check if bot is in a number chain
+        if (snap.chainPlayerId === pid && snap.chainValue !== null) {
+          // Bot can only play same number or end turn
+          const canContinueChain = hand.some(c => 
+            c.kind === "number" && c.value === snap.chainValue
+          );
+          
+          if (canContinueChain) {
+            // Play another card of same value
+            const idx = hand.findIndex(c => 
+              c.kind === "number" && c.value === snap.chainValue
+            );
+            try {
+              r.play(pid, idx);
+            } catch (e) {
+              // If can't play, end turn
+              try { r.endTurn(pid); } catch { }
             }
+          } else {
+            // No more cards of that value - end turn
+            try {
+              r.endTurn(pid);
+            } catch { /* ignore */ }
           }
-        } catch (e) {
-          try { r.drawAndMaybePlay(pid); } catch { /* ignore */ }
+        } else {
+          // Normal turn - use AI to choose card
+          const choice = chooseForAI([...hand], snap.topCard);
+          try {
+            if (choice === "draw") {
+              r.drawAndMaybePlay(pid);
+            } else {
+              const idx = hand.findIndex(c => c === choice);
+              if (idx >= 0) {
+                if (choice.kind === "wild") {
+                  r.play(pid, idx, pickColor(hand));
+                } else {
+                  r.play(pid, idx);
+                }
+              } else {
+                r.drawAndMaybePlay(pid);
+              }
+            }
+          } catch (e) {
+            try { r.drawAndMaybePlay(pid); } catch { /* ignore */ }
+          }
         }
+        
         snap = r.snapshot();
         snapshot.value = snap;
         await sleep(200);
@@ -402,7 +464,7 @@ export default {
 
     return { 
       numBots, running, snapshot, playerHand, showColorPicker, drawnCardIndex, hasPlayableCard, drawButtonText, isPenaltyDraw,
-      startGame, stopGame, playCard, selectColor, drawCard, endTurn,
+      startGame, stopGame, playCard, selectColor, drawCard, passTurn, endTurn,
       describeCard, cardStyle, formatHistory, getCardImage, getColorHex
     };
   }

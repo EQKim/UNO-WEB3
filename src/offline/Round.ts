@@ -54,6 +54,8 @@ export class Round {
       startCard = this.drawOneStrict();
     }
     this.discard.push(startCard);
+    // Note: Action cards (Skip, Reverse, Draw 2) at start do NOT trigger their effects
+    // They are treated as normal cards to match against
   }
 
   private drawOneStrict(): Card { const d = this.deck.draw(1)[0]; if (!d) throw new Error("Deck empty"); return d; }
@@ -153,7 +155,7 @@ export class Round {
     if (card.kind === "action") {
       if (card.action === "draw2") { this.pendingDraw += 2; this.pendingType = "draw2"; }
       if (card.action === "reverse") { this.direction = (this.players.length === 2) ? this.direction : (this.direction === 1 ? -1 : 1); }
-      if (card.action === "skip") { this.advanceIndex(); }
+      // Skip is handled by advancing twice at the end (once for normal turn, once for skip effect)
     }
 
   this.discard.push(card);
@@ -183,6 +185,10 @@ export class Round {
       this.chainPlayerId = null;
       this.chainValue = null;
       this.advanceIndex();
+      // Skip cards advance one additional time to skip the next player
+      if (card.kind === "action" && card.action === "skip") {
+        this.advanceIndex();
+      }
     }
     if (this.pendingType && this.chainPlayerId == null) {
       this.pendingTargetId = this.current.id; // next player must respond
@@ -210,6 +216,16 @@ export class Round {
     this.chainPlayerId = null;
     this.chainValue = null;
     this.history.push({ kind: "endTurn", playerId });
+    this.advanceIndex();
+  }
+
+  pass(playerId: string) {
+    this.assertTurn(playerId);
+    // Pass: player drew a card and chooses not to play it
+    // This ends their turn and advances to the next player
+    this.chainPlayerId = null;
+    this.chainValue = null;
+    this.history.push({ kind: "pass", playerId });
     this.advanceIndex();
   }
 
