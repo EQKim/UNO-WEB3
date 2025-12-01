@@ -9,7 +9,8 @@ export default defineConfig({
   plugins: [vue()],
   base: "/UNO-WEB3/",
   server: {
-    port: 5173
+    port: 5173,
+    strictPort: true
   },
   define: {
     __BUILD_TIME__: JSON.stringify(buildTime)
