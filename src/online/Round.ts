@@ -1,7 +1,7 @@
 import type { Card, Color } from "../cards/Card";
 import { matches } from "../cards/Rules";
 import { createStandardDeck, drawFromDeck, refillDeck, shuffle } from "./Deck";
-import { addCard, removeCardAt, getCardAt, getHandSize, findPlayableIndex, isHandEmpty } from "./Hand";
+import { removeCardAt, getCardAt, findPlayableIndex, isHandEmpty } from "./Hand";
 
 // Functional Programming: Immutable game state with pure functions
 // No classes, no mutations - all operations return new state
@@ -220,7 +220,6 @@ export const drawCards = (
   }
 
   const amount = count ?? (state.pendingDraw > 0 ? state.pendingDraw : 1);
-  const player = getCurrentPlayer(state);
   
   const { newDeck, newDiscard, drawnCards } = drawWithReshuffle(state.deck, state.discard, amount);
   
@@ -461,10 +460,10 @@ export const drawAndMaybePlay = (
   const prePending = state.pendingDraw;
   const stateAfterDraw = drawCards(state, playerId, undefined);
   
-  const drawnCards = stateAfterDraw.history
-    .slice(-1)[0]?.kind === "draw" || stateAfterDraw.history.slice(-1)[0]?.kind === "penaltyDraw"
-    ? (stateAfterDraw.history.slice(-1)[0] as any).amount
-    : 0;
+  // const drawnCards = stateAfterDraw.history
+  //   .slice(-1)[0]?.kind === "draw" || stateAfterDraw.history.slice(-1)[0]?.kind === "penaltyDraw"
+  //   ? (stateAfterDraw.history.slice(-1)[0] as any).amount
+  //   : 0;
 
   if (prePending > 0) {
     return { newState: stateAfterDraw, drawn: [], played: false };

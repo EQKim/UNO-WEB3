@@ -10,6 +10,32 @@ import { store } from "./store";
 import { setRoom, setPlayers, setMyHand } from "./gameSlice";
 
 /**
+ * Sanitize Firestore data to be Redux-serializable
+ * Converts Timestamps and other non-serializable objects to plain values
+ */
+function sanitize(data: any): any {
+  if (!data) return data;
+  if (typeof data !== 'object') return data;
+  
+  // Handle Firestore Timestamp
+  if (data.toDate && typeof data.toDate === 'function') {
+    return data.toDate().toISOString();
+  }
+  
+  // Handle arrays
+  if (Array.isArray(data)) {
+    return data.map(item => sanitize(item));
+  }
+  
+  // Handle objects
+  const sanitized: any = {};
+  for (const key in data) {
+    sanitized[key] = sanitize(data[key]);
+  }
+  return sanitized;
+}
+
+/**
  * Create an RxJS Observable from a Firestore document snapshot
  */
 export function createDocumentObservable<T>(
@@ -80,7 +106,7 @@ export function startListeningToRoom(roomId: string): () => void {
       next: (room) => {
         console.log("[RxJS] Room update:", room);
         if (room) {
-          store.dispatch(setRoom(room));
+          store.dispatch(setRoom(sanitize(room)));
         }
       },
       error: (err) => console.error("Room stream error:", err)
@@ -95,7 +121,7 @@ export function startListeningToRoom(roomId: string): () => void {
     playersObservable.subscribe({
       next: (players) => {
         console.log("[RxJS] Players update:", players);
-        store.dispatch(setPlayers(players));
+        store.dispatch(setPlayers(sanitize(players)));
       },
       error: (err) => console.error("Players stream error:", err)
     })
@@ -112,7 +138,7 @@ export function startListeningToRoom(roomId: string): () => void {
       handObservable.subscribe({
         next: (handDoc) => {
           console.log("[RxJS] Hand update:", handDoc);
-          store.dispatch(setMyHand(handDoc?.cards ?? []));
+          store.dispatch(setMyHand(sanitize(handDoc?.cards ?? [])));
         },
         error: (err) => console.error("Hand stream error:", err)
       })

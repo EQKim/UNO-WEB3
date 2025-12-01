@@ -1979,3 +1979,934 @@ compose(f, g, h)   // h → g → f
 - ✅ All state updates return new objects
 
 **Your UNO game is fully compliant with functional programming principles! 🎉**
+
+---
+
+---
+
+# 📋 Assignment 6: Next.js Server-Side Rendering (SSR)
+
+## Assignment 6 Overview
+
+**Goal:** Convert the Vue application to **Next.js with React** while retaining all features from Assignments 4 and 5.
+
+**Key Requirements:**
+- ✅ Use Next.js App Router for SSR
+- ✅ Distinguish between Server Components and Client Components
+- ✅ Work with both `npm run dev` and `npm run build; npm run start`
+- ✅ Retain Redux + RxJS state management
+- ✅ Retain functional programming model
+- ✅ Retain Firebase + GraphQL backend
+
+---
+
+## 🏗️ Architecture Changes
+
+### **Before (Assignment 5):** Vue + Vite
+```
+src/
+  main.ts           # Vue app entry
+  App.vue          # Root component
+  ui/
+    Lobby.vue      # Vue component
+    CardView.vue   # Vue component
+  services/
+    OnlineBoard.vue # Vue component with Redux
+  store/
+    vue.ts         # Vue-Redux bridge
+```
+
+### **After (Assignment 6):** Next.js + React
+```
+app/
+  layout.tsx       # Root layout (Server Component)
+  page.tsx         # Home page (Server Component)
+  globals.css      # Global styles
+  components/
+    ReduxProvider.tsx  # Client Component - Redux Provider
+    Lobby.tsx          # Client Component
+    CardView.tsx       # Client Component
+    OnlineBoard.tsx    # Client Component
+  lobby/
+    page.tsx       # Lobby page route
+
+src/
+  store/
+    hooks.ts       # React-Redux hooks (replaces vue.ts)
+  [all other files unchanged - functional model, Firebase, etc.]
+```
+
+---
+
+## 🔑 Key Concepts: Server vs Client Components
+
+### **Server Components** (Default in Next.js App Router)
+- Rendered on the server
+- Can access server-only resources (databases, APIs)
+- Smaller JavaScript bundle sent to client
+- Cannot use React hooks (`useState`, `useEffect`, etc.)
+- Cannot use browser APIs
+
+**Examples in our app:**
+- `app/layout.tsx` - Root layout
+- `app/page.tsx` - Home page
+- `app/lobby/page.tsx` - Lobby page route
+
+```typescript
+// app/page.tsx - Server Component (no 'use client')
+export default function HomePage() {
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center p-8">
+      <h1 className="text-4xl font-bold mb-8">UNO Online</h1>
+      <a href="/lobby" className="...">Enter Lobby</a>
+    </main>
+  )
+}
+```
+
+### **Client Components** (Marked with `'use client'`)
+- Rendered on client (browser)
+- Can use React hooks and browser APIs
+- Can handle interactivity and state
+- Required for Redux, Firebase auth, game logic
+
+**Examples in our app:**
+- `app/components/ReduxProvider.tsx` - Redux Provider
+- `app/components/Lobby.tsx` - Interactive lobby
+- `app/components/OnlineBoard.tsx` - Game board with Redux
+- `app/components/CardView.tsx` - Card rendering
+
+```typescript
+// app/components/ReduxProvider.tsx - Client Component
+'use client'
+
+import { Provider } from 'react-redux'
+import { store } from '@/src/store/store'
+
+export function ReduxProvider({ children }: { children: React.ReactNode }) {
+  return <Provider store={store}>{children}</Provider>
+}
+```
+
+**Rule:** Any component that uses:
+- `useState`, `useEffect`, `useReducer`
+- Redux (`useSelector`, `useDispatch`)
+- Browser APIs (`window`, `localStorage`, etc.)
+- Event handlers (`onClick`, `onChange`, etc.)
+
+**Must be a Client Component!**
+
+---
+
+## 🔄 Converting Vue to React
+
+### **1. Component Structure**
+
+**Vue (Before):**
+```vue
+<template>
+  <div class="...">{{ message }}</div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+const message = ref('Hello')
+</script>
+```
+
+**React (After):**
+```typescript
+'use client'
+
+import { useState } from 'react'
+
+export default function MyComponent() {
+  const [message, setMessage] = useState('Hello')
+  
+  return (
+    <div className="...">{message}</div>
+  )
+}
+```
+
+### **2. Reactivity**
+
+| Vue | React |
+|-----|-------|
+| `ref(value)` | `useState(value)` |
+| `computed(() => ...)` | `useMemo(() => ..., [deps])` |
+| `watch(source, cb)` | `useEffect(() => { cb() }, [deps])` |
+| `v-model="value"` | `value={value} onChange={(e) => setValue(e.target.value)}` |
+| `v-if="condition"` | `{condition && <div>...</div>}` |
+| `v-for="item in items"` | `{items.map(item => <div key={item.id}>...</div>)}` |
+
+### **3. Redux Integration**
+
+**Vue (Before):**
+```typescript
+// src/store/vue.ts
+import { ref, computed, onUnmounted } from 'vue'
+import { store } from './store'
+
+export function useSelector<T>(selector: (state: RootState) => T) {
+  const state = ref(selector(store.getState()))
+  const unsubscribe = store.subscribe(() => {
+    state.value = selector(store.getState())
+  })
+  onUnmounted(() => unsubscribe())
+  return computed(() => state.value)
+}
+```
+
+**React (After):**
+```typescript
+// src/store/hooks.ts
+import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux'
+import type { RootState, AppDispatch } from './store'
+
+export const useAppDispatch = () => useDispatch<AppDispatch>()
+export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector
+```
+
+**Usage:**
+```typescript
+// Vue
+const room = useSelector((state: RootState) => state.game.room)
+
+// React
+const room = useAppSelector((state) => state.game.room)
+```
+
+---
+
+## 🚀 Build & Deployment
+
+### **Development Mode**
+```bash
+npm run dev
+```
+- Turbopack bundler (faster than Webpack)
+- Hot Module Replacement (HMR)
+- Runs on http://localhost:3000
+
+### **Production Build**
+```bash
+npm run build
+```
+- Creates optimized production bundle
+- Type checks with TypeScript
+- Generates static pages where possible
+- Output in `.next/` directory
+
+### **Production Server**
+```bash
+npm run start
+```
+- Serves production build
+- No hot reload (use for testing final build)
+
+---
+
+## 📦 File Structure Decisions
+
+### **Static vs Dynamic Pages**
+
+**Static Pages** (Pre-rendered at build time):
+- Home page (`app/page.tsx`)
+- Can be served from CDN
+- Fast load times
+
+**Dynamic Pages** (Rendered on each request or client):
+- Lobby page (`app/lobby/page.tsx`) - Client-side rendering
+- Game board - Client-side with Firebase real-time data
+
+**Decision:** Our app uses mostly client-side rendering because:
+1. Real-time multiplayer requires client-side state
+2. Firebase auth happens on client
+3. Redux state is client-side
+4. Game logic is interactive
+
+For a production deployment, you could:
+- Make home page static (already is)
+- Use SSR for lobby to show initial room list
+- Keep game board client-rendered for interactivity
+
+---
+
+## 🔧 Configuration Files
+
+### **next.config.js**
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+}
+
+export default nextConfig
+```
+
+### **tsconfig.json** (Updated by Next.js)
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",           // React automatic runtime
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]              // Path alias
+    },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"]
+}
+```
+
+### **package.json**
+```json
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  }
+}
+```
+
+---
+
+## ✅ Assignment 6 Compliance Checklist
+
+- ✅ **Next.js:** Using Next.js 16 with App Router
+- ✅ **SSR:** Root layout is a Server Component
+- ✅ **Server/Client Distinction:** Clear separation with `'use client'`
+- ✅ **Development:** `npm run dev` works
+- ✅ **Production Build:** `npm run build` succeeds
+- ✅ **Production Server:** `npm run start` works
+- ✅ **Redux Retained:** All Redux logic works with React
+- ✅ **RxJS Retained:** Firebase streams still use RxJS
+- ✅ **Functional Model Retained:** `src/online/` unchanged
+- ✅ **Firebase Retained:** Authentication and Firestore work
+- ✅ **GraphQL Retained:** Mutations still use GraphQL
+
+---
+
+## 🎓 Exam Study Tips for Assignment 6
+
+### **Common Exam Questions:**
+
+1. **"What's the difference between Server and Client Components?"**
+   - Server: Rendered on server, can't use hooks, smaller bundle
+   - Client: Rendered on client, can use hooks/state, interactive
+
+2. **"When should you use 'use client'?"**
+   - Hooks (`useState`, `useEffect`, `useSelector`)
+   - Browser APIs (`window`, `document`, `localStorage`)
+   - Event handlers (`onClick`, `onChange`)
+   - External libraries that use client features
+
+3. **"How do you convert Vue to React?"**
+   - `ref` → `useState`
+   - `computed` → `useMemo`
+   - `v-model` → `value` + `onChange`
+   - `v-if` → `{condition && ...}`
+   - `v-for` → `.map()`
+
+4. **"What's the build process?"**
+   - `npm run build` creates production bundle
+   - TypeScript is type-checked
+   - Static pages are pre-rendered
+   - Output goes to `.next/` directory
+
+5. **"How does Redux work with Next.js?"**
+   - Create Provider as Client Component
+   - Wrap app in `layout.tsx`
+   - Use `react-redux` hooks in Client Components
+   - Store remains the same (no changes needed)
+
+---
+
+---
+
+## 🐛 Common Issues & Solutions (Assignment 6)
+
+### **Issue 1: GraphQL CORS Error**
+
+**Problem:**
+```
+Failed to fetch
+POST https://uno-graphql-web-3.vercel.app/api/graphql net::ERR_FAILED
+```
+
+**Cause:** GraphQL server only allowed `localhost:5173`, but Next.js defaults to port `3000`
+
+**Solutions:**
+1. **Option A: Change Next.js port** (Chosen)
+   ```json
+   // package.json
+   "scripts": {
+     "dev": "next dev -p 5173",
+     "start": "next start -p 5173"
+   }
+   ```
+
+2. **Option B: Update CORS on GraphQL server**
+   - Add `http://localhost:3000` to allowed origins
+   - Requires backend access
+
+**Lesson:** When integrating with existing backends, check CORS configuration early!
+
+---
+
+### **Issue 2: hasDrawnThisTurn State Bug**
+
+**Problem:**
+After drawing penalty cards (+2/+4), player gets stuck - can't play cards or end turn.
+
+**Root Cause:**
+```typescript
+// Client tracks if player has drawn this turn
+const [hasDrawnThisTurn, setHasDrawnThisTurn] = useState(false)
+
+// ❌ PROBLEM: When server advances turn due to drawing penalties,
+// client state doesn't reset automatically
+```
+
+**Timeline of Bug:**
+1. Player A plays +2
+2. Player B draws 2 cards (sets `hasDrawnThisTurn = true`)
+3. **Server automatically ends Player B's turn** (penalties skip turn)
+4. ❌ Client still has `hasDrawnThisTurn = true` from previous turn
+5. Player B can't play cards on their next turn!
+
+**Solution:**
+Add multiple reset mechanisms in `OnlineBoard.tsx`:
+
+```typescript
+// Reset when isMyTurn changes
+useEffect(() => {
+  if (!isMyTurn) {
+    setHasDrawnThisTurn(false)
+  }
+}, [isMyTurn])
+
+// Reset when room.currentTurn changes (catches server-side turn changes)
+useEffect(() => {
+  if (room?.currentTurn) {
+    setHasDrawnThisTurn(false)
+  }
+}, [room?.currentTurn])
+
+// Reset after successfully playing a card
+async function handlePlayCard(card: Card, index: number) {
+  await playCardOnline(room.id, card)
+  setHasDrawnThisTurn(false)  // ✅ Reset here too
+}
+```
+
+**Lesson:** Client state can desync from server state in real-time apps. Always reset client-side flags when server advances game state!
+
+---
+
+### **Issue 3: Redux Serialization Warnings**
+
+**Problem:**
+```
+A non-serializable value was detected in the state, in the path: `game.room.finishedAt`
+Value: Timestamp { seconds: 1733000000, nanoseconds: 0 }
+```
+
+**Cause:** Firestore returns `Timestamp` objects (not serializable in Redux)
+
+**Solution:**
+Add sanitization in `streams.ts`:
+
+```typescript
+function sanitize(data: any): any {
+  if (!data) return data
+  if (typeof data !== 'object') return data
+  
+  // ✅ Detect Firestore Timestamp
+  if (data.toDate && typeof data.toDate === 'function') {
+    return data.toDate().toISOString()  // Convert to ISO string
+  }
+  
+  // Recursively sanitize arrays
+  if (Array.isArray(data)) {
+    return data.map(item => sanitize(item))
+  }
+  
+  // Recursively sanitize objects
+  const sanitized: any = {}
+  for (const key in data) {
+    sanitized[key] = sanitize(data[key])
+  }
+  return sanitized
+}
+
+// Apply to all Redux dispatches
+roomObservable.subscribe({
+  next: (room) => {
+    if (room) {
+      store.dispatch(setRoom(sanitize(room)))  // ✅ Clean before dispatch
+    }
+  }
+})
+```
+
+**Lesson:** Redux requires serializable state. Always sanitize third-party data structures before storing in Redux!
+
+---
+
+### **Issue 4: isMyTurn Reference Error**
+
+**Problem:**
+```
+ReferenceError: Cannot access 'isMyTurn' before initialization
+```
+
+**Cause:**
+```typescript
+// ❌ BAD: useEffect uses isMyTurn before it's defined
+useEffect(() => {
+  if (!isMyTurn) {  // Error: isMyTurn not defined yet!
+    setHasDrawnThisTurn(false)
+  }
+}, [isMyTurn])
+
+const isMyTurn = useMemo(() => 
+  room?.currentTurn === user?.uid,
+  [room, user]
+)  // Defined AFTER useEffect tries to use it
+```
+
+**Solution:**
+Define `isMyTurn` **before** any useEffect that depends on it:
+
+```typescript
+// ✅ GOOD: Define isMyTurn first
+const isMyTurn = useMemo(() => 
+  room?.currentTurn === user?.uid,
+  [room, user]
+)
+
+// Now useEffect can safely reference it
+useEffect(() => {
+  if (!isMyTurn) {
+    setHasDrawnThisTurn(false)
+  }
+}, [isMyTurn])
+```
+
+**Lesson:** JavaScript reads top-to-bottom. Define variables/computed values before using them in hooks!
+
+---
+
+### **Issue 5: Vue Files Lingering After Migration**
+
+**Problem:** After converting to Next.js, Vue files still present causing confusion.
+
+**Files to Remove:**
+```bash
+# Component files
+src/App.vue
+src/main.ts
+src/ui/Lobby.vue
+src/ui/CardView.vue
+src/services/OnlineBoard.vue
+
+# Vite configuration
+vite.config.ts
+index.html
+tsconfig.app.json
+tsconfig.node.json
+
+# Vue-specific
+src/store/vue.ts
+src/assets/
+```
+
+**Dependencies to Remove:**
+```bash
+npm uninstall vue @vitejs/plugin-vue vite vue-tsc gh-pages
+```
+
+**Lesson:** Clean up old framework files to avoid confusion and reduce bundle size!
+
+---
+
+## 🔧 Debugging Techniques (Assignment 6)
+
+### **1. Redux DevTools**
+
+Install browser extension, then configure store:
+
+```typescript
+// src/store/store.ts
+export const store = configureStore({
+  reducer: { game: gameReducer },
+  devTools: process.env.NODE_ENV !== 'production'  // Enable in dev
+})
+```
+
+**Features:**
+- Inspect Redux state in real-time
+- See all dispatched actions
+- Time-travel debugging (replay actions)
+
+### **2. React DevTools**
+
+Install browser extension to:
+- Inspect component tree
+- See props and state
+- Highlight re-renders
+- Identify performance issues
+
+### **3. Console Logging Patterns**
+
+```typescript
+// Log state changes in useEffect
+useEffect(() => {
+  console.log('Room updated:', room)
+  console.log('Is my turn:', isMyTurn)
+}, [room, isMyTurn])
+
+// Log before/after mutations
+async function handlePlayCard(card: Card, index: number) {
+  console.log('Playing card:', card, 'at index:', index)
+  await playCardOnline(room.id, card)
+  console.log('Card played successfully')
+}
+
+// Log RxJS stream events
+roomObservable.subscribe({
+  next: (room) => {
+    console.log('[RxJS] Room updated:', room)
+    store.dispatch(setRoom(sanitize(room)))
+  },
+  error: (err) => console.error('[RxJS] Room error:', err)
+})
+```
+
+### **4. Network Tab Analysis**
+
+Check GraphQL requests:
+1. Open DevTools → Network tab
+2. Filter by `Fetch/XHR`
+3. Look for requests to GraphQL endpoint
+4. Check request payload and response
+5. Verify CORS headers
+
+---
+
+## 📊 Performance Optimization (Assignment 6)
+
+### **1. Memoization**
+
+**useMemo** - Cache computed values:
+```typescript
+// ✅ Expensive calculation cached
+const playableCards = useMemo(() => {
+  if (!room?.topCard || !myHand) return []
+  return myHand.filter(card => matches(room.topCard, card))
+}, [room?.topCard, myHand])  // Only recalculate when these change
+```
+
+**useCallback** - Cache functions:
+```typescript
+// ✅ Function reference stays stable
+const handlePlayCard = useCallback(async (card: Card, index: number) => {
+  await playCardOnline(room.id, card)
+  setHasDrawnThisTurn(false)
+}, [room?.id])  // Only recreate if room.id changes
+```
+
+### **2. Code Splitting**
+
+Next.js automatically splits code by route:
+```
+app/page.tsx       → page.js (home page bundle)
+app/lobby/page.tsx → lobby/page.js (lobby bundle)
+```
+
+Lazy load heavy components:
+```typescript
+import dynamic from 'next/dynamic'
+
+const OnlineBoard = dynamic(() => import('@/app/components/OnlineBoard'), {
+  loading: () => <p>Loading game...</p>,
+  ssr: false  // Disable SSR for this component
+})
+```
+
+### **3. Image Optimization**
+
+Use Next.js `Image` component:
+```typescript
+import Image from 'next/image'
+
+<Image 
+  src={`/cards/${card.kind}_${card.color}.png`}
+  alt="UNO card"
+  width={100}
+  height={150}
+  priority  // Load immediately (for above-the-fold images)
+/>
+```
+
+### **4. Subscription Cleanup**
+
+Always unsubscribe from RxJS streams:
+```typescript
+useEffect(() => {
+  const unsubscribe = startListeningToRoom(roomId)
+  
+  // ✅ Cleanup on unmount
+  return () => {
+    if (unsubscribe) unsubscribe()
+  }
+}, [roomId])
+```
+
+---
+
+## 🎯 Advanced Topics (Assignment 6)
+
+### **1. Server Actions** (Next.js 13+)
+
+Create server-side functions that can be called from Client Components:
+
+```typescript
+// app/actions.ts
+'use server'
+
+import { db } from '@/src/firebase'
+import { collection, addDoc } from 'firebase/firestore'
+
+export async function createRoom(userId: string) {
+  const roomRef = await addDoc(collection(db, 'rooms'), {
+    hostId: userId,
+    status: 'waiting',
+    createdAt: new Date()
+  })
+  return roomRef.id
+}
+```
+
+**Usage in Client Component:**
+```typescript
+'use client'
+
+import { createRoom } from '../actions'
+
+async function handleCreateRoom() {
+  const roomId = await createRoom(user!.uid)
+  router.push(`/game/${roomId}`)
+}
+```
+
+### **2. Middleware**
+
+Run code before requests complete:
+
+```typescript
+// middleware.ts
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+
+export function middleware(request: NextRequest) {
+  // Check authentication
+  const token = request.cookies.get('auth-token')
+  
+  if (!token && request.nextUrl.pathname.startsWith('/lobby')) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+  
+  return NextResponse.next()
+}
+
+export const config = {
+  matcher: ['/lobby/:path*', '/game/:path*']
+}
+```
+
+### **3. API Routes**
+
+Create backend endpoints in Next.js:
+
+```typescript
+// app/api/rooms/route.ts
+import { NextResponse } from 'next/server'
+import { db } from '@/src/firebase'
+import { collection, getDocs } from 'firebase/firestore'
+
+export async function GET() {
+  const snapshot = await getDocs(collection(db, 'rooms'))
+  const rooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  return NextResponse.json(rooms)
+}
+```
+
+**Note:** Our app uses GraphQL instead of Next.js API routes, but this is an alternative!
+
+### **4. Static Site Generation (SSG)**
+
+Pre-render pages at build time:
+
+```typescript
+// app/rooms/[id]/page.tsx
+export async function generateStaticParams() {
+  const rooms = await fetchAllRooms()
+  return rooms.map(room => ({ id: room.id }))
+}
+
+export default function RoomPage({ params }: { params: { id: string } }) {
+  return <div>Room {params.id}</div>
+}
+```
+
+**When to use:**
+- Content doesn't change often
+- Same content for all users
+- Need fastest possible load times
+
+**When NOT to use:**
+- Real-time data (like our game)
+- User-specific content
+- Frequently changing data
+
+---
+
+## 🎓 Exam Questions - Assignment 6
+
+### **Q1: What's the difference between SSR and CSR?**
+
+**SSR (Server-Side Rendering):**
+- HTML generated on server for each request
+- Fast initial page load
+- Good for SEO
+- Server cost higher
+
+**CSR (Client-Side Rendering):**
+- HTML generated in browser with JavaScript
+- Initial page is blank template
+- Slower first load, faster navigation
+- Less server load
+
+**Our app uses CSR** for game components (requires interactivity, real-time updates).
+
+### **Q2: When should you use 'use client'?**
+
+Use when component needs:
+- ✅ React hooks (`useState`, `useEffect`, `useReducer`)
+- ✅ Browser APIs (`window`, `localStorage`, `navigator`)
+- ✅ Event handlers (`onClick`, `onSubmit`)
+- ✅ External libraries that use client features (Redux, Firebase auth)
+
+Don't use when:
+- ❌ Component is purely static
+- ❌ Component fetches data on server
+- ❌ Want smallest possible bundle
+
+### **Q3: How do you migrate from Vue to React?**
+
+**State:**
+- `ref()` → `useState()`
+- `reactive()` → `useState({})`
+- `computed()` → `useMemo()`
+- `watch()` → `useEffect()`
+
+**Lifecycle:**
+- `onMounted()` → `useEffect(() => { ... }, [])`
+- `onUnmounted()` → `useEffect(() => { return () => { cleanup } }, [])`
+
+**Template Syntax:**
+- `{{ value }}` → `{value}`
+- `v-if` → `{condition && <div>...</div>}`
+- `v-for` → `.map(item => <div key={item.id}>...</div>)`
+- `v-model` → `value={value} onChange={e => setValue(e.target.value)}`
+- `@click` → `onClick`
+
+**Components:**
+- `<script setup>` → Function component
+- `defineProps()` → Function parameters
+- `defineEmits()` → Callback props
+
+### **Q4: Explain the Redux integration flow in Next.js**
+
+```
+1. Create Store (src/store/store.ts)
+   ↓
+2. Create Provider Component (app/components/ReduxProvider.tsx)
+   'use client'  ← Mark as Client Component
+   ↓
+3. Wrap App in layout.tsx
+   <ReduxProvider><children /></ReduxProvider>
+   ↓
+4. Use in Client Components
+   const data = useAppSelector(state => state.game.room)
+   const dispatch = useAppDispatch()
+```
+
+### **Q5: What happens during npm run build?**
+
+1. **Type Checking:** TypeScript verifies all types
+2. **Linting:** ESLint checks code quality
+3. **Compilation:** TypeScript → JavaScript, JSX → React calls
+4. **Bundling:** Webpack/Turbopack bundles all code
+5. **Optimization:** Minification, tree-shaking, code splitting
+6. **Static Generation:** Pre-render static pages
+7. **Output:** Create `.next/` directory with production files
+
+---
+
+## 🎉 All Assignments Complete!
+
+Your UNO game now demonstrates:
+- ✅ **Assignment 4:** Functional Programming (immutable state, pure functions)
+- ✅ **Assignment 5:** Redux + RxJS (reactive state management)
+- ✅ **Assignment 6:** Next.js SSR (server/client architecture)
+
+**You've built a production-ready online multiplayer UNO game with modern web technologies!** 🎮🔥
+
+---
+
+## 📚 Quick Reference Summary
+
+### **Assignment 4: Functional Programming**
+- ✅ Pure functions only
+- ✅ Immutable data (`readonly`)
+- ✅ No classes, no mutations
+- ✅ Higher-order functions (map, filter, reduce)
+- ✅ Closures for encapsulation
+- ✅ Function composition
+- ✅ Only `const` and `let`
+
+### **Assignment 5: Redux + RxJS**
+- ✅ Redux store with createSlice
+- ✅ RxJS Observables for Firestore
+- ✅ Subscription management
+- ✅ Pure reducers
+- ✅ Typed selectors
+- ✅ Integration with Vue (A5) or React (A6)
+
+### **Assignment 6: Next.js**
+- ✅ App Router structure
+- ✅ Server vs Client Components
+- ✅ `'use client'` directive
+- ✅ React hooks (`useState`, `useEffect`, `useMemo`)
+- ✅ Redux with react-redux
+- ✅ Build and production deployment
+- ✅ CORS configuration
+- ✅ State synchronization debugging
+
+**Total Tech Stack:**
+- Next.js 16 + React 19
+- Redux Toolkit + RxJS
+- Firebase + Firestore
+- GraphQL (Vercel deployment)
+- TypeScript 5
+- Tailwind CSS
+- Functional programming patterns
+
+**You're ready for the exam! Good luck! 🍀**
+

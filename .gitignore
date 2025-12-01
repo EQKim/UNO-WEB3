@@ -60,3 +60,7 @@ firebase-debug.*.log
 # OS-specific files (Windows)
 Thumbs.db
 desktop.ini
+
+# Next.js
+.next/
+next-env.d.ts
