@@ -393,7 +393,9 @@ export const playCard = (
   let newPendingTargetId = state.pendingTargetId;
 
   if (skipNext) {
-    newCurrentIndex = advanceIndex(newState);
+    // Skip advances turn twice (once for normal, once for skip effect)
+    const tempState = { ...newState, currentIndex: advanceIndex(newState) };
+    newCurrentIndex = advanceIndex(tempState);
     newChainPlayerId = null;
     newChainValue = null;
   } else if (!newPendingType && removedCard.kind === "number") {
