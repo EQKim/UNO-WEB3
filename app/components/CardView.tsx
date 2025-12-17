@@ -38,7 +38,7 @@ export default function CardView({ card, onPlay, size = 'md' }: CardViewProps) {
   return (
     <div
       title={JSON.stringify(card)}
-      className="m-1 p-0 rounded-lg border border-slate-400 overflow-hidden bg-white hover:shadow transition"
+      className="m-1 p-0 rounded-lg border border-slate-400 overflow-hidden bg-white hover:shadow-lg hover:-translate-y-2 transition-all duration-200 ease-in-out"
       style={{ width: `${dims.w}px`, height: `${dims.h}px`, cursor: onPlay ? 'pointer' : 'inherit' }}
       onClick={handleClick}
     >

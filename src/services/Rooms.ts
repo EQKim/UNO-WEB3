@@ -1,39 +1,59 @@
 // src/services/rooms.ts
-import {
-  addDoc, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where
-} from "firebase/firestore";
+import { onSnapshot, collection, doc } from "firebase/firestore";
 import { auth, db, ensureAnonAuth } from "../firebase";
 
-export async function createRoom(displayName: string) {
+// GraphQL endpoint - your UNO-GRAPHQL-WEB3 server
+// For local dev: run your GraphQL server separately, it will be on a different port (e.g., 3000, 4000)
+// For production: use your deployed Vercel URL
+const GRAPHQL_ENDPOINT = process.env.NEXT_PUBLIC_GRAPHQL_ENDPOINT || 'http://localhost:3000/api/graphql';
+
+async function callGraphQL(query: string, variables?: Record<string, any>) {
   await ensureAnonAuth();
-  const uid = auth.currentUser!.uid;
-  const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const token = await auth.currentUser!.getIdToken();
 
-  const roomRef = await addDoc(collection(db, "rooms"), {
-    code, hostUid: uid, status: "lobby", createdAt: serverTimestamp()
+  const response = await fetch(GRAPHQL_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query, variables }),
   });
 
-  await setDoc(doc(db, "rooms", roomRef.id, "players", uid), {
-    displayName, joinedAt: serverTimestamp(), isReady: false, isHost: true, handCount: 0
-  });
+  const result = await response.json();
+  
+  if (result.errors) {
+    throw new Error(result.errors[0]?.message || 'GraphQL Error');
+  }
+  
+  return result.data;
+}
 
-  return { roomId: roomRef.id, code };
+export async function createRoom(displayName: string) {
+  const query = `
+    mutation CreateRoom($displayName: String!) {
+      createRoom(displayName: $displayName) {
+        roomId
+        code
+      }
+    }
+  `;
+
+  const data = await callGraphQL(query, { displayName });
+  return { roomId: data.createRoom.roomId, code: data.createRoom.code };
 }
 
 export async function joinRoomByCode(code: string, displayName: string) {
-  await ensureAnonAuth();
-  const uid = auth.currentUser!.uid;
+  const query = `
+    mutation JoinRoom($code: String!, $displayName: String!) {
+      joinRoom(code: $code, displayName: $displayName) {
+        roomId
+      }
+    }
+  `;
 
-  const q = query(collection(db, "rooms"), where("code", "==", code));
-  const snap = await getDocs(q);
-  if (snap.empty) throw new Error("Room not found");
-
-  const roomId = snap.docs[0].id;
-  await setDoc(doc(db, "rooms", roomId, "players", uid), {
-    displayName, joinedAt: serverTimestamp(), isReady: false, isHost: false, handCount: 0
-  }, { merge: true });
-
-  return { roomId };
+  const data = await callGraphQL(query, { code, displayName });
+  return { roomId: data.joinRoom.roomId };
 }
 
 export function listenRoom(roomId: string, onRoom: (room:any)=>void, onPlayers:(players:any[])=>void) {
