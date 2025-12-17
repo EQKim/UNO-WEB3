@@ -23,7 +23,8 @@ export type HistoryEntry =
   | { kind: "play"; playerId: string; card: Card; chosenColor?: Color }
   | { kind: "draw"; playerId: string; amount: number }
   | { kind: "penaltyDraw"; playerId: string; amount: number; reason: "draw2" | "draw4" }
-  | { kind: "endTurn"; playerId: string };
+  | { kind: "endTurn"; playerId: string }
+  | { kind: "pass"; playerId: string };
 
 export class Round {
   private deck: Deck;

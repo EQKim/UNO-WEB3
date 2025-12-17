@@ -111,11 +111,12 @@
 </template>
 
 <script lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import { Round } from "./offline";
 import type { RoundSnapshot } from "./offline/Round";
-import { chooseForAI, matches } from "./cards/Rules";
+import { matches } from "./cards/Rules";
 import type { Card, Color } from "./cards/Card";
+import type { BotRequest, BotResponse } from "./bot-worker";
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -129,6 +130,8 @@ export default {
     const pendingCardIndex = ref<number | null>(null);
     const drawnCardIndex = ref<number | null>(null);
     let loopCancel = false;
+    let botWorkers: Worker[] = [];
+    let botMoveResolvers = new Map<string, (response: BotResponse) => void>();
 
     const playerHand = computed(() => {
       if (!round.value || !snapshot.value) return [];
@@ -203,17 +206,6 @@ export default {
       return colors[color] || "#6b7280";
     }
 
-    function cardStyle(c: Card) {
-      const colors: Record<string, string> = {
-        red: "#ef4444",
-        yellow: "#fbbf24",
-        green: "#22c55e",
-        blue: "#3b82f6"
-      };
-      if (c.kind === "wild") return { background: "#6b7280", color: "#fff" };
-      return { background: colors[c.color] || "#ccc", color: c.color === "yellow" ? "#000" : "#fff" };
-    }
-
     function formatHistory(h: any) {
       switch (h.kind) {
         case "play": {
@@ -230,12 +222,7 @@ export default {
       return JSON.stringify(h);
     }
 
-    function pickColor(hand: readonly Card[]): Color {
-      const counts: Record<Color, number> = { red: 0, yellow: 0, green: 0, blue: 0 };
-      hand.forEach(c => { if (c.kind !== "wild") counts[c.color]++; });
-      const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-      return (entries[0]?.[0] as Color) || "red";
-    }
+
 
     function playCard(idx: number, card: Card) {
       if (!round.value || snapshot.value?.currentPlayer !== "You") return;
@@ -379,60 +366,61 @@ export default {
       }
     }
 
+    // Request bot move via Web Worker
+    function requestBotMove(playerId: string, hand: readonly Card[], snap: RoundSnapshot): Promise<BotResponse> {
+      return new Promise((resolve) => {
+        const botIndex = parseInt(playerId.replace('Bot', '')) - 1;
+        
+        if (botIndex < 0 || botIndex >= botWorkers.length) {
+          resolve({ type: "moveReady", action: "draw" });
+          return;
+        }
+
+        const worker = botWorkers[botIndex];
+        botMoveResolvers.set(playerId, resolve);
+
+        // Convert cards to plain objects for worker serialization
+        const request: BotRequest = {
+          type: "makeMove",
+          hand: hand.map(c => JSON.parse(JSON.stringify(c))),
+          topCard: JSON.parse(JSON.stringify(snap.topCard)),
+          pendingDraw: snap.pendingDraw,
+          pendingType: snap.pendingType,
+          chainValue: snap.chainValue
+        };
+
+        worker.postMessage(request);
+      });
+    }
+
     async function botsLoop(r: Round) {
       if (loopCancel) return;
       let snap = r.snapshot();
       snapshot.value = snap;
+      
       while (!loopCancel && !snap.winner && snap.currentPlayer !== "You") {
         await sleep(2000);
         const pid = snap.currentPlayer;
         const hand = r.getHand(pid);
         
-        // Check if bot is in a number chain
-        if (snap.chainPlayerId === pid && snap.chainValue !== null) {
-          // Bot can only play same number or end turn
-          const canContinueChain = hand.some(c => 
-            c.kind === "number" && c.value === snap.chainValue
-          );
-          
-          if (canContinueChain) {
-            // Play another card of same value
-            const idx = hand.findIndex(c => 
-              c.kind === "number" && c.value === snap.chainValue
-            );
-            try {
-              r.play(pid, idx);
-            } catch (e) {
-              // If can't play, end turn
-              try { r.endTurn(pid); } catch { }
-            }
-          } else {
-            // No more cards of that value - end turn
-            try {
-              r.endTurn(pid);
-            } catch { /* ignore */ }
-          }
-        } else {
-          // Normal turn - use AI to choose card
-          const choice = chooseForAI([...hand], snap.topCard);
-          try {
-            if (choice === "draw") {
-              r.drawAndMaybePlay(pid);
+        // Request move from Web Worker
+        const response = await requestBotMove(pid, hand, snap);
+        
+        try {
+          if (response.action === "draw") {
+            r.drawAndMaybePlay(pid);
+          } else if (response.action === "endTurn") {
+            r.endTurn(pid);
+          } else if (response.action === "play" && response.cardIndex !== undefined) {
+            if (response.chosenColor) {
+              r.play(pid, response.cardIndex, response.chosenColor);
             } else {
-              const idx = hand.findIndex(c => c === choice);
-              if (idx >= 0) {
-                if (choice.kind === "wild") {
-                  r.play(pid, idx, pickColor(hand));
-                } else {
-                  r.play(pid, idx);
-                }
-              } else {
-                r.drawAndMaybePlay(pid);
-              }
+              r.play(pid, response.cardIndex);
             }
-          } catch (e) {
-            try { r.drawAndMaybePlay(pid); } catch { /* ignore */ }
           }
+        } catch (e) {
+          // Fallback to draw on any error
+          try { r.drawAndMaybePlay(pid); } catch { /* ignore */ }
         }
         
         snap = r.snapshot();
@@ -445,6 +433,35 @@ export default {
     }
 
     function startGame() {
+      // Clean up old workers
+      botWorkers.forEach(w => w.terminate());
+      botWorkers = [];
+      botMoveResolvers.clear();
+
+      // Create Web Workers for each bot
+      for (let i = 0; i < numBots.value; i++) {
+        const worker = new Worker(new URL('./bot-worker.ts', import.meta.url), { type: 'module' });
+        
+        worker.onmessage = (e: MessageEvent<BotResponse>) => {
+          const playerId = `Bot${i + 1}`;
+          const resolver = botMoveResolvers.get(playerId);
+          if (resolver) {
+            resolver(e.data);
+            botMoveResolvers.delete(playerId);
+          }
+        };
+
+        worker.onerror = (error) => {
+          const resolver = botMoveResolvers.get(`Bot${i + 1}`);
+          if (resolver) {
+            resolver({ type: "moveReady", action: "draw" });
+            botMoveResolvers.delete(`Bot${i + 1}`);
+          }
+        };
+
+        botWorkers.push(worker);
+      }
+
       const names = ["You", ...Array.from({ length: numBots.value }, (_, i) => `Bot${i+1}`)];
       const r = new Round(names, { deal: 7 });
       round.value = r;
@@ -452,20 +469,34 @@ export default {
       running.value = true;
       loopCancel = false;
       drawnCardIndex.value = null;
-      if (snapshot.value.currentPlayer !== "You") {
-        botsLoop(r);
-      }
+      
+      // Give workers a moment to initialize before starting bot loop
+      setTimeout(() => {
+        if (snapshot.value && snapshot.value.currentPlayer !== "You") {
+          botsLoop(r);
+        }
+      }, 100);
     }
 
     function stopGame() { 
       loopCancel = true; 
-      running.value = false; 
+      running.value = false;
+      botWorkers.forEach(w => w.terminate());
+      botWorkers = [];
+      botMoveResolvers.clear();
     }
+
+    // Clean up workers on component unmount
+    onUnmounted(() => {
+      botWorkers.forEach(w => w.terminate());
+      botWorkers = [];
+      botMoveResolvers.clear();
+    });
 
     return { 
       numBots, running, snapshot, playerHand, showColorPicker, drawnCardIndex, hasPlayableCard, drawButtonText, isPenaltyDraw,
       startGame, stopGame, playCard, selectColor, drawCard, passTurn, endTurn,
-      describeCard, cardStyle, formatHistory, getCardImage, getColorHex
+      describeCard, formatHistory, getCardImage, getColorHex
     };
   }
 };

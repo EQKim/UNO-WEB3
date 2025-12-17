@@ -60,3 +60,9 @@ firebase-debug.*.log
 # OS-specific files (Windows)
 Thumbs.db
 desktop.ini
+
+# Next.js cache
+.next/
+
+# VS Code/IDE cache
+.rscinfo
