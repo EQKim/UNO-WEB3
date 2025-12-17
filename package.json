@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/offline/demo.ts",
-    "dev:history": "tsx src/offline/demo.ts --history",
-    "dev:verbose": "tsx src/offline/demo.ts --verbose",
+    "dev": "tsx src/core/demo.ts",
+    "dev:history": "tsx src/core/demo.ts --history",
+    "dev:verbose": "tsx src/core/demo.ts --verbose",
     "typecheck": "tsc -p tsconfig.app.json"
   },
   "devDependencies": {
