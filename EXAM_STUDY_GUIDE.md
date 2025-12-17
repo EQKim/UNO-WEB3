@@ -61,6 +61,120 @@ export function useSelector<T>(selector: (state: RootState) => T): ComputedRef<T
 
 ---
 
+## 📚 RxJS Exam Concepts (From Course Slides)
+
+The course description states: *"I will be asking about e.g.: One-way data flow, reducers, slices, thunks, (RxJS) observables, subjects, pipes and operators, merge vs concat"*
+
+### **Key RxJS Concepts:**
+
+#### **1. Observables**
+**Definition:** A lazy Push collection of multiple values over time.
+
+**Our Implementation:** `src/store/streams.ts`
+```typescript
+export function createDocumentObservable<T>(docPath: string): Observable<T | null> {
+  return new Observable((subscriber) => {
+    const docRef = doc(db, docPath);
+    
+    // ✅ Observable wraps Firestore onSnapshot
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        // Push new value when Firestore updates
+        subscriber.next({ id: snapshot.id, ...snapshot.data() } as T);
+      },
+      (error) => subscriber.error(error)
+    );
+    
+    // ✅ Return cleanup function
+    return () => unsubscribe();
+  });
+}
+```
+
+**Exam Question:** *"What is an Observable?"*
+- A stream that emits values over time
+- Lazy (doesn't execute until subscribed)
+- Can emit multiple values (unlike Promises which emit once)
+- Supports operators for transformation (map, filter, etc.)
+
+#### **2. Subjects**
+**Definition:** A special Observable that can multicast to many observers (both Observable and Observer).
+
+**Note:** Our solution uses standard Observables (not Subjects) because Firestore's `onSnapshot` already handles multicasting internally.
+
+**When to use Subjects:**
+- Need to manually push values (`subject.next(value)`)
+- Multiple subscribers should receive same values
+- Hot observables (vs cold)
+
+#### **3. Pipes and Operators**
+**Definition:** Operators transform Observable values (like array methods but for streams).
+
+**Common operators:**
+- `map()` - Transform each value
+- `filter()` - Only emit values that pass test
+- `take(n)` - Only take first n values
+- `switchMap()` - Switch to new Observable
+
+**Example (not in our code, but for exam):**
+```typescript
+import { map, filter } from 'rxjs/operators';
+
+const numbers$ = new Observable(sub => {
+  sub.next(1); sub.next(2); sub.next(3);
+});
+
+numbers$.pipe(
+  filter(x => x > 1),  // Only 2, 3
+  map(x => x * 10)     // Transform to 20, 30
+).subscribe(val => console.log(val));
+```
+
+#### **4. Merge vs Concat**
+
+**merge()** - Subscribe to all Observables simultaneously (parallel)
+```typescript
+import { merge } from 'rxjs';
+
+const room$ = createDocumentObservable('rooms/abc');
+const players$ = createCollectionObservable('rooms/abc/players');
+
+// ✅ Both streams run in parallel
+merge(room$, players$).subscribe(data => console.log(data));
+```
+
+**concat()** - Subscribe to Observables sequentially (one after another)
+```typescript
+import { concat } from 'rxjs';
+
+// ✅ players$ only starts after room$ completes
+concat(room$, players$).subscribe(data => console.log(data));
+```
+
+**Our Implementation:**
+We use **parallel subscriptions** (similar to merge concept):
+```typescript
+// src/store/streams.ts - Line 73
+export function startListeningToRoom(roomId: string): () => void {
+  const subscriptions: Subscription[] = [];
+  
+  // ✅ All three Observables run simultaneously (like merge)
+  subscriptions.push(roomObservable.subscribe({...}));
+  subscriptions.push(playersObservable.subscribe({...}));
+  subscriptions.push(handObservable.subscribe({...}));
+  
+  return () => subscriptions.forEach(sub => sub.unsubscribe());
+}
+```
+
+**Exam Answer:**
+- **merge**: Interleaves emissions from multiple Observables (parallel)
+- **concat**: Subscribes to next Observable only after previous completes (sequential)
+- **Our solution**: Uses merge-like pattern (parallel subscriptions)
+
+---
+
 ## 🎯 Part 1: Redux State Management
 
 ### **What is Redux?**
@@ -72,6 +186,113 @@ Redux is a **predictable state container** for JavaScript applications. It centr
 2. **Actions** - Plain objects describing what happened
 3. **Reducers** - Pure functions that specify how state changes
 4. **Dispatch** - Function to send actions to the store
+
+### **One-Way Data Flow (Exam Topic)**
+
+**Definition:** Data flows in a single direction through the application.
+
+**Redux/RxJS Flow in Our App:**
+```
+Firestore Update → RxJS Observable → Redux Action → Reducer → Store → Component
+     ↑                                                                      |
+     └───────────────── User Action (GraphQL Mutation) ←───────────────────┘
+```
+
+**Step-by-Step:**
+1. **User clicks button** in `OnlineBoard.vue`
+2. **GraphQL mutation** sent to server (`playCardOnline()`)
+3. **Server updates Firestore** with new game state
+4. **Firestore triggers snapshot** event
+5. **RxJS Observable emits** new data (`createDocumentObservable`)
+6. **Observable subscription dispatches** Redux action (`store.dispatch(setRoom(...))`)
+7. **Redux reducer** updates store immutably
+8. **Vue component re-renders** via `useSelector` hook
+
+**Code Example:** `src/services/OnlineBoard.vue` (Line 210-215)
+```typescript
+onMounted(() => {
+  // ✅ Start one-way data flow: Firestore → RxJS → Redux → Vue
+  unsubscribe = startListeningToRoom(roomId);
+});
+```
+
+**Exam Question:** *"Explain one-way data flow in Redux"*
+- UI triggers action → Action dispatched → Reducer updates state → UI re-renders
+- Data never flows backwards (no direct state mutation)
+- Predictable and debuggable
+
+### **Reducers (Exam Topic)**
+
+**Definition:** Pure functions that take previous state + action, return new state.
+
+**Our Implementation:** `src/store/gameSlice.ts`
+```typescript
+import { createSlice } from "@reduxjs/toolkit";
+
+const gameSlice = createSlice({
+  name: "game",
+  initialState: {
+    room: null,
+    players: [],
+    myHand: []
+  },
+  reducers: {
+    // ✅ Reducer: (state, action) => newState
+    setRoom: (state, action) => {
+      state.room = action.payload;  // Redux Toolkit uses Immer (auto-immutable)
+    },
+    setPlayers: (state, action) => {
+      state.players = action.payload;
+    },
+    setMyHand: (state, action) => {
+      state.myHand = action.payload;
+    },
+    resetGame: (state) => {
+      state.room = null;
+      state.players = [];
+      state.myHand = [];
+    }
+  }
+});
+```
+
+**Exam Answer:**
+- **Pure function**: Same input always produces same output
+- **No side effects**: Don't call APIs, modify arguments, etc.
+- **Immutable updates**: Return new state object (Redux Toolkit handles this with Immer)
+
+### **Slices (Exam Topic)**
+
+**Definition:** A "slice" of Redux state with its own reducers and actions.
+
+**Our Implementation:** `src/store/gameSlice.ts`
+```typescript
+// ✅ gameSlice manages the "game" portion of Redux state
+const gameSlice = createSlice({
+  name: "game",  // Namespace for actions: "game/setRoom"
+  initialState: { room, players, myHand },
+  reducers: { setRoom, setPlayers, setMyHand, resetGame }
+});
+
+export const { setRoom, setPlayers, setMyHand, resetGame } = gameSlice.actions;
+export default gameSlice.reducer;
+```
+
+**Store Configuration:** `src/store/store.ts`
+```typescript
+export const store = configureStore({
+  reducer: {
+    game: gameReducer  // ✅ "game" slice
+    // Could add more slices: user: userReducer, ui: uiReducer
+  }
+});
+```
+
+**Exam Question:** *"What is a slice in Redux Toolkit?"*
+- A collection of reducer logic and actions for a specific feature
+- Automatically generates action creators
+- Reduces boilerplate compared to traditional Redux
+- Organizes code by feature domain
 
 ---
 
@@ -296,6 +517,56 @@ const isMyTurn = useSelector((state: RootState) =>
   state.game.room?.currentTurn === myPlayerId
 );
 ```
+
+**Exam Question:** *"What is a selector in Redux?"*
+- A function that extracts data from Redux state
+- Can compute derived data (memoized with reselect library)
+- Keeps components decoupled from state shape
+- Example: `(state) => state.game.room`
+
+---
+
+### **1F. Thunks (Exam Topic)**
+
+**Definition:** A thunk is a function that wraps an expression to delay its evaluation. In Redux, thunks are used for async actions.
+
+**Traditional Redux Thunk Pattern:**
+```typescript
+// Async action creator (returns function, not object)
+const fetchUser = (userId) => async (dispatch) => {
+  dispatch({ type: 'FETCH_USER_START' });
+  try {
+    const user = await api.getUser(userId);
+    dispatch({ type: 'FETCH_USER_SUCCESS', payload: user });
+  } catch (error) {
+    dispatch({ type: 'FETCH_USER_ERROR', error });
+  }
+};
+```
+
+**Our Implementation:**
+We don't use explicit thunks because:
+1. **RxJS handles async** - Observables manage real-time data streams
+2. **GraphQL mutations** - Server actions are simple async functions
+3. **Direct dispatch** - Observable subscriptions dispatch synchronously
+
+**Code Reference:** `src/store/streams.ts` (Lines 77-85)
+```typescript
+// ✅ Observable subscription dispatches directly (no thunk needed)
+roomObservable.subscribe({
+  next: (room) => {
+    if (room) {
+      store.dispatch(setRoom(room));  // Synchronous dispatch
+    }
+  }
+});
+```
+
+**Exam Question:** *"What is a thunk in Redux?"*
+- A function returned by an action creator for async logic
+- Receives `dispatch` and `getState` as arguments
+- Used for API calls, side effects, conditional dispatching
+- We use RxJS Observables instead for real-time streams
 
 **Exam Question:** *"What is a selector in Redux?"*
 - Function that takes Redux state and returns derived data
@@ -580,24 +851,190 @@ export function useDispatch() {
 4. Vue's reactivity system detects the change
 5. Component re-renders with new data
 
-**Usage in Vue component:**
+**Usage in Vue component:** `src/services/OnlineBoard.vue` (Lines 199-202)
 
 ```typescript
 import { useSelector } from "../store/vue";
 
 // ✅ Creates reactive reference that updates automatically
-const room = useSelector((state) => state.game.room);
-const players = useSelector((state) => state.game.players);
+const room = useSelector((state: RootState) => state.game.room);
+const players = useSelector((state: RootState) => state.game.players);
+const myHand = useSelector((state: RootState) => state.game.myHand);
 
 // Use in template
 <div>{{ room?.status }}</div>
 <div>Players: {{ players.length }}</div>
+<div>Cards in hand: {{ myHand.length }}</div>
+```
+
+**Component Lifecycle:** `src/services/OnlineBoard.vue` (Lines 210-217)
+```typescript
+let unsubscribe: (() => void) | null = null;
+
+onMounted(() => {
+  // ✅ Start RxJS streams when component mounts
+  unsubscribe = startListeningToRoom(roomId);
+});
+
+onUnmounted(() => {
+  // ✅ Clean up subscriptions when component unmounts
+  if (unsubscribe) unsubscribe();
+});
 ```
 
 **Exam Question:** *"How does Vue connect to Redux?"*
 - Custom `useSelector` hook wraps Redux state in Vue `computed()`
 - `computed()` makes the value reactive
 - When Redux state updates, Vue reactivity triggers re-render
+
+---
+
+## 🔄 Part 4: Complete Data Flow Example
+
+### **Real-World Scenario: Playing a Card**
+
+**User Action → Server → Firestore → RxJS → Redux → Vue**
+
+**Step 1: User clicks card** (`OnlineBoard.vue` - template)
+```vue
+<div @click="onPlay(card, index)" class="card-wrapper">
+  <CardView :card="card" size="md" />
+</div>
+```
+
+**Step 2: Component calls GraphQL mutation** (`OnlineBoard.vue` - Line ~280)
+```typescript
+const onPlay = async (card: Card, index: number) => {
+  // If wild card, choose color first
+  if (card.kind === "wild") {
+    pendingWild.value = { index, card };
+    return;
+  }
+  
+  // ✅ Send mutation to GraphQL server
+  await playCardOnline(roomId, card);
+};
+```
+
+**Step 3: GraphQL server validates and updates Firestore** (`OnlineGame.ts` - Lines 53-58)
+```typescript
+export async function playCardOnline(roomId: string, card: Card) {
+  type R = { playCard: boolean };
+  await gql<R>(
+    `mutation ($roomId: ID!, $card: JSON!) { playCard(roomId: $roomId, card: $card) }`,
+    { roomId, card }
+  );
+}
+```
+
+**Step 4: Firestore triggers snapshot event**
+- Server updates `rooms/{roomId}` document with new `topCard`
+- Firestore's `onSnapshot` callback fires
+
+**Step 5: RxJS Observable emits new data** (`streams.ts` - Lines 20-26)
+```typescript
+const unsubscribe = onSnapshot(
+  docRef,
+  (snapshot) => {
+    // ✅ Observable pushes new value to subscribers
+    subscriber.next({ id: snapshot.id, ...snapshot.data() } as T);
+  }
+);
+```
+
+**Step 6: Observable subscription dispatches Redux action** (`streams.ts` - Lines 77-85)
+```typescript
+roomObservable.subscribe({
+  next: (room) => {
+    console.log("[RxJS] Room update:", room);
+    if (room) {
+      // ✅ Dispatch to Redux store
+      store.dispatch(setRoom(room));
+    }
+  }
+});
+```
+
+**Step 7: Redux reducer updates state** (`gameSlice.ts`)
+```typescript
+reducers: {
+  setRoom: (state, action) => {
+    // ✅ Immutable update (Redux Toolkit uses Immer)
+    state.room = action.payload;
+  }
+}
+```
+
+**Step 8: Vue component reactively updates** (`OnlineBoard.vue` - Line 199)
+```typescript
+// ✅ useSelector hook detects Redux state change
+const room = useSelector((state: RootState) => state.game.room);
+
+// ✅ Computed property automatically recalculates
+const top = computed<Card | null>(() => room.value?.topCard ?? null);
+```
+
+**Step 9: Template re-renders with new card**
+```vue
+<CardView :card="top" size="lg" />
+```
+
+**Complete Flow Diagram:**
+```
+┌─────────────┐
+│ User Click  │
+└──────┬──────┘
+       ↓
+┌──────────────────┐
+│ playCardOnline() │ (GraphQL mutation)
+└──────┬───────────┘
+       ↓
+┌──────────────┐
+│ Server Logic │ (validates, updates Firestore)
+└──────┬───────┘
+       ↓
+┌───────────────┐
+│ Firestore DB  │
+└──────┬────────┘
+       ↓ (snapshot event)
+┌────────────────┐
+│ RxJS Observable│ (emits new data)
+└──────┬─────────┘
+       ↓
+┌──────────────────┐
+│ Observable.next()│
+└──────┬───────────┘
+       ↓
+┌────────────────────┐
+│ store.dispatch()   │ (Redux action)
+└──────┬─────────────┘
+       ↓
+┌────────────────┐
+│ Reducer        │ (updates state)
+└──────┬─────────┘
+       ↓
+┌────────────────┐
+│ Redux Store    │ (new state)
+└──────┬─────────┘
+       ↓
+┌────────────────┐
+│ useSelector()  │ (Vue hook detects change)
+└──────┬─────────┘
+       ↓
+┌────────────────┐
+│ Component      │ (re-renders)
+└────────────────┘
+```
+
+**Exam Question:** *"Explain the complete data flow from user action to UI update"*
+1. User interaction triggers GraphQL mutation
+2. Server validates and updates Firestore
+3. Firestore snapshot callback fires
+4. RxJS Observable emits new data
+5. Observable subscriber dispatches Redux action
+6. Redux reducer updates state immutably
+7. Vue `useSelector` detects change via `computed()`
+8. Component re-renders with new data
 - `useDispatch` provides access to Redux dispatch function
 
 ---
@@ -914,6 +1351,169 @@ const playableCards = useSelector(state => {
 | **Redux for state management** | ✅ Complete | `src/store/store.ts`, `gameSlice.ts` |
 | **RxJS for server messages** | ✅ Complete | `src/store/streams.ts` with Observables |
 | React for rendering (optional) | ⚠️ Optional | Vue + Redux bridge (`vue.ts`) |
+
+---
+
+## 📂 Quick Code Reference Map
+
+### **Redux Files**
+- **`src/store/store.ts`** - Redux store configuration with `configureStore()`
+  - Line 5-13: Store setup with gameReducer
+  - Line 16-17: TypeScript types (RootState, AppDispatch)
+  
+- **`src/store/gameSlice.ts`** - Redux slice with actions/reducers
+  - Line 10-15: Initial state definition
+  - Line 17-35: Reducers (setRoom, setPlayers, setMyHand, resetGame)
+  - Line 38: Export action creators
+  
+- **`src/store/types.ts`** - TypeScript interfaces
+  - GameState, RoomData, PlayerData interfaces
+
+### **RxJS Files**
+- **`src/store/streams.ts`** - RxJS Observables wrapping Firestore
+  - Line 15-36: `createDocumentObservable()` - Wraps Firestore doc
+  - Line 43-65: `createCollectionObservable()` - Wraps Firestore collection
+  - Line 73-128: `startListeningToRoom()` - Subscribes to 3 Observables (room, players, hand)
+  - Line 77-85: Room Observable subscription → dispatches `setRoom()`
+  - Line 88-97: Players Observable subscription → dispatches `setPlayers()`
+  - Line 102-113: Hand Observable subscription → dispatches `setMyHand()`
+  - Line 117-120: Cleanup function returning unsubscribe callbacks
+
+### **Vue-Redux Bridge**
+- **`src/store/vue.ts`** - Custom hooks for Vue integration
+  - Line 5-17: `useSelector()` - Wraps Redux state in Vue computed()
+  - Line 19-21: `useDispatch()` - Returns Redux dispatch function
+
+### **Component Integration**
+- **`src/services/OnlineBoard.vue`** - Main game component
+  - Line 199-202: useSelector hooks reading Redux state
+  - Line 205-207: Local UI state (not in Redux)
+  - Line 210-217: onMounted/onUnmounted lifecycle with RxJS cleanup
+  - Line 220-235: Computed properties deriving data from Redux state
+  - Line 280+: Event handlers calling GraphQL mutations
+
+### **GraphQL Mutations**
+- **`src/services/OnlineGame.ts`** - GraphQL client
+  - Line 11-38: `gql()` helper function with Firebase auth
+  - Line 43-48: `startGameClient()` mutation
+  - Line 50-55: `playCardOnline()` mutation
+  - Line 57-62: `drawOneOnline()` mutation
+  - Line 64-69: `endTurnOnline()` mutation
+
+### **Functional Model (Assignment 4)**
+- **`src/online/Deck.ts`** - Pure deck functions with lodash
+  - Uses `_.shuffle()` for deck randomization
+  
+- **`src/online/Hand.ts`** - Pure hand functions with lodash
+  - Uses `_.concat()`, `_.take()`, `_.drop()` for immutable operations
+  
+- **`src/online/Round.ts`** - Game state management with lodash
+  - Uses `_.map()`, `_.concat()`, `_.last()`, `_.initial()` throughout
+  - All functions are pure (no mutations)
+  
+- **`src/online/functional-utils.ts`** - Higher-order functions
+  - compose(), pipe(), curry() implementations
+
+---
+
+## 🎯 Exam Answer Templates
+
+### **"Explain one-way data flow in our application"**
+```
+1. User clicks button in OnlineBoard.vue
+2. GraphQL mutation sent to server (playCardOnline())
+3. Server updates Firestore database
+4. Firestore triggers snapshot event
+5. RxJS Observable emits new data (createDocumentObservable)
+6. Observable subscription dispatches Redux action (store.dispatch(setRoom()))
+7. Redux reducer updates state immutably (gameSlice)
+8. Vue useSelector detects change via computed()
+9. Component re-renders with new data
+
+Code: See src/store/streams.ts line 77-85
+```
+
+### **"What is a reducer in Redux?"**
+```
+A pure function that takes (state, action) and returns new state.
+- Must be pure (no side effects)
+- Must return new state (immutable)
+- Handles specific action types
+
+Example: src/store/gameSlice.ts line 20-22
+setRoom: (state, action) => {
+  state.room = action.payload; // Redux Toolkit uses Immer for immutability
+}
+```
+
+### **"What is an Observable in RxJS?"**
+```
+A lazy stream that emits values over time.
+- Lazy: doesn't execute until subscribed
+- Can emit multiple values (unlike Promises)
+- Supports operators for transformation
+- Requires cleanup (unsubscribe)
+
+Example: src/store/streams.ts line 15-36 (createDocumentObservable)
+```
+
+### **"Explain merge vs concat in RxJS"**
+```
+merge(): Subscribes to all Observables simultaneously (parallel)
+- Interleaves emissions from multiple sources
+- All streams run at the same time
+- Use when order doesn't matter
+
+concat(): Subscribes to Observables sequentially (one after another)
+- Waits for previous Observable to complete
+- Then subscribes to next
+- Use when order matters
+
+Our implementation: Uses merge-like pattern with parallel subscriptions
+Code: src/store/streams.ts line 75-115
+```
+
+### **"What is a slice in Redux Toolkit?"**
+```
+A collection of reducer logic and actions for a specific feature.
+- Automatically generates action creators
+- Reduces boilerplate code
+- Uses Immer for immutable updates
+- Organized by domain/feature
+
+Example: src/store/gameSlice.ts
+- name: "game" (action namespace)
+- initialState: { room, players, myHand }
+- reducers: { setRoom, setPlayers, setMyHand, resetGame }
+```
+
+### **"What is a thunk in Redux?"**
+```
+A function returned by an action creator for async logic.
+- Receives dispatch and getState as arguments
+- Used for API calls, delays, conditional logic
+- Can dispatch multiple actions
+
+Our implementation: We use RxJS Observables instead
+Code: src/store/streams.ts (Observables handle async, dispatch synchronously)
+```
+
+### **"How does Vue connect to Redux?"**
+```
+Custom hooks bridge Vue reactivity with Redux:
+
+1. useSelector():
+   - Wraps selector in Vue computed()
+   - Returns reactive reference
+   - Auto-updates when Redux state changes
+   
+2. useDispatch():
+   - Returns Redux dispatch function
+   - Used to send actions to store
+
+Code: src/store/vue.ts lines 5-21
+Usage: src/services/OnlineBoard.vue lines 199-202
+```
 
 ---
 

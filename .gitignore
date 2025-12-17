@@ -29,6 +29,8 @@ dist-ssr
 build/
 out/
 .vite/
+.next/
+next/
 
 # TypeScript incremental build info
 *.tsbuildinfo
@@ -43,6 +45,7 @@ nyc_output/
 .cache/
 .tmp/
 tmp/
+server/
 
 # Environment files (keep an example if needed)
 .env
