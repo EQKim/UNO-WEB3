@@ -1,39 +1,73 @@
 // src/services/rooms.ts
-import {
-  addDoc, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where
-} from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 import { auth, db, ensureAnonAuth } from "../firebase";
 
-export async function createRoom(displayName: string) {
+/**
+ * GraphQL endpoint (same as OnlineGame.ts)
+ */
+const GRAPHQL_URL = "https://uno-graphql-web-3.vercel.app/api/graphql";
+
+/** Helper to call GraphQL with Firebase auth */
+async function gql<T>(query: string, variables?: Record<string, any>): Promise<T> {
   await ensureAnonAuth();
-  const uid = auth.currentUser!.uid;
-  const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const token = await auth.currentUser?.getIdToken();
 
-  const roomRef = await addDoc(collection(db, "rooms"), {
-    code, hostUid: uid, status: "lobby", createdAt: serverTimestamp()
+  const res = await fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ query, variables }),
   });
 
-  await setDoc(doc(db, "rooms", roomRef.id, "players", uid), {
-    displayName, joinedAt: serverTimestamp(), isReady: false, isHost: true, handCount: 0
-  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GraphQL HTTP ${res.status} ${res.statusText} ${text}`);
+  }
 
-  return { roomId: roomRef.id, code };
+  const json = await res.json();
+  if (json.errors?.length) {
+    throw new Error(json.errors[0]?.message ?? "GraphQL error");
+  }
+  return json.data as T;
 }
 
+/**
+ * Create room via GraphQL mutation
+ */
+export async function createRoom(displayName: string) {
+  type Response = { createRoom: { roomId: string; code: string } };
+  
+  const result = await gql<Response>(
+    `mutation ($displayName: String!) {
+      createRoom(displayName: $displayName) {
+        roomId
+        code
+      }
+    }`,
+    { displayName }
+  );
+
+  return { roomId: result.createRoom.roomId, code: result.createRoom.code };
+}
+
+/**
+ * Join room via GraphQL mutation
+ */
 export async function joinRoomByCode(code: string, displayName: string) {
-  await ensureAnonAuth();
-  const uid = auth.currentUser!.uid;
+  type Response = { joinRoom: { roomId: string } };
+  
+  const result = await gql<Response>(
+    `mutation ($code: String!, $displayName: String!) {
+      joinRoom(code: $code, displayName: $displayName) {
+        roomId
+      }
+    }`,
+    { code, displayName }
+  );
 
-  const q = query(collection(db, "rooms"), where("code", "==", code));
-  const snap = await getDocs(q);
-  if (snap.empty) throw new Error("Room not found");
-
-  const roomId = snap.docs[0].id;
-  await setDoc(doc(db, "rooms", roomId, "players", uid), {
-    displayName, joinedAt: serverTimestamp(), isReady: false, isHost: false, handCount: 0
-  }, { merge: true });
-
-  return { roomId };
+  return { roomId: result.joinRoom.roomId };
 }
 
 export function listenRoom(roomId: string, onRoom: (room:any)=>void, onPlayers:(players:any[])=>void) {
