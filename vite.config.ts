@@ -7,7 +7,7 @@ const buildTime = new Date().toISOString();
 
 export default defineConfig({
   plugins: [vue()],
-  base: "/UNO-WEB3/",
+  base: process.env.NODE_ENV === 'production' ? "/UNO-WEB3/" : "/",
   server: {
     port: 5173,
     strictPort: true
