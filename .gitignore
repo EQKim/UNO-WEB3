@@ -43,6 +43,9 @@ nyc_output/
 .cache/
 .tmp/
 tmp/
+.next/
+.rscinfo/
+chrome-devtools-workspace-uuid
 
 # Environment files (keep an example if needed)
 .env

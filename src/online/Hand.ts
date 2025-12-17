@@ -1,27 +1,29 @@
 import type { Card } from "../cards/Card";
+import _ from "lodash";
 
-// Functional Programming: Pure functions for hand operations
+// Functional Programming: Pure functions for hand operations using lodash
 // All functions return new arrays without modifying the original
 
 /**
  * Pure function to add a card to a hand
- * Returns a new hand array
+ * Returns a new hand array using lodash.concat
  */
 export const addCard = (hand: readonly Card[], card: Card): readonly Card[] => {
-  return [...hand, card];
+  return _.concat(hand, card);
 };
 
 /**
  * Pure function to add multiple cards to a hand
- * Uses reduce to demonstrate higher-order functions
+ * Uses lodash.concat to add multiple cards at once
  */
 export const addCards = (hand: readonly Card[], cards: readonly Card[]): readonly Card[] => {
-  return cards.reduce((acc, card) => addCard(acc, card), hand);
+  return _.concat(hand, ...cards);
 };
 
 /**
  * Pure function to remove a card at a specific index
  * Returns new hand and the removed card (if found)
+ * Uses lodash for immutable array manipulation
  */
 export const removeCardAt = (
   hand: readonly Card[],
@@ -30,8 +32,12 @@ export const removeCardAt = (
   if (index < 0 || index >= hand.length) {
     return { newHand: hand, removedCard: undefined };
   }
+  const newHand = _.concat(
+    _.take(hand, index),
+    _.drop(hand, index + 1)
+  );
   return {
-    newHand: [...hand.slice(0, index), ...hand.slice(index + 1)],
+    newHand,
     removedCard: hand[index]
   };
 };

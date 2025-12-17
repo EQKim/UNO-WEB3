@@ -9,7 +9,6 @@
     "noEmit": true,
 
     // Vue + Vite
-    "types": ["vite/client"],
     "jsx": "preserve",
     "useDefineForClassFields": true
   },

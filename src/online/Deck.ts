@@ -1,6 +1,7 @@
 import type { Card } from "../cards/Card";
+import _ from "lodash";
 
-// Functional Programming: Pure functions with immutable data structures
+// Functional Programming: Pure functions with immutable data structures using lodash
 // No classes, no mutations, only pure transformations
 
 /**
@@ -39,20 +40,15 @@ export const createStandardDeck = (): readonly Card[] => {
 };
 
 /**
- * Pure function to shuffle an array (Fisher-Yates algorithm)
+ * Pure function to shuffle an array using lodash.shuffle
  * Returns a new shuffled array without modifying the original
  */
 export const shuffle = <T>(array: readonly T[]): readonly T[] => {
-  const arr = [...array]; // Create new array (immutability)
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
+  return _.shuffle([...array]); // lodash.shuffle requires mutable array, so we clone first
 };
 
 /**
- * Pure function to draw cards from a deck
+ * Pure function to draw cards from a deck using lodash
  * Returns new deck and drawn cards without mutations
  */
 export const drawFromDeck = (
@@ -61,18 +57,18 @@ export const drawFromDeck = (
 ): { readonly newDeck: readonly Card[]; readonly drawnCards: readonly Card[] } => {
   const actualCount = Math.min(count, deck.length);
   return {
-    drawnCards: deck.slice(0, actualCount),
-    newDeck: deck.slice(actualCount)
+    drawnCards: _.take(deck, actualCount),
+    newDeck: _.drop(deck, actualCount)
   };
 };
 
 /**
- * Pure function to refill deck with discard pile
+ * Pure function to refill deck with discard pile using lodash
  * Returns new shuffled deck
  */
 export const refillDeck = (
   currentDeck: readonly Card[],
   discardPile: readonly Card[]
 ): readonly Card[] => {
-  return shuffle([...currentDeck, ...discardPile]);
+  return shuffle(_.concat(currentDeck, discardPile));
 };

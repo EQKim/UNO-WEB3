@@ -1,44 +1,47 @@
-# UNO Web3 – Assignment 5 Conversion
+# UNO Web3 – Assignment 4: Functional Programming
 
-This branch implements the assignment requirements of converting the previous Vue client into a Redux + RxJS powered architecture while retaining existing UNO gameplay features.
+This branch implements the assignment requirements of converting the UNO game logic to use functional programming principles with immutable data structures and pure functions.
 
 ## ✅ Requirements Implemented
 
 Must have:
-- Functional model: existing server/game logic retained (top card, stacking, chaining, wild color choice).
-- Retained features from assignments 1–3 (drawing, playing, stacking +2/+4, number chaining, wild color picker, win state).
-- Redux for state management (`src/store/*`).
-- RxJS for handling messages from the server (Firestore snapshots wrapped as Observables in `streams.ts`).
+- **Functional programming style**: All game logic uses pure functions with no side effects
+- **Immutable data structures**: All types use `readonly` modifiers, no mutations
+- **Lodash library**: Uses lodash for array operations (_.map, _.concat, _.take, _.drop, _.shuffle)
+- **Higher-order functions**: Demonstrates compose, pipe, curry, closures in `functional-utils.ts`
+- **Pure functions**: All state transformations return new objects without modifying inputs
 
 Should have:
-- React recommended – currently still using Vue for rendering; Redux + RxJS integrated. (React layer can be added in `react/` folder later.)
+- UNO calling function (optional feature)
 
-## Architecture Overview
+Could have:
+- Unit tests for pure functions
+
+## Functional Programming Architecture
 
 ```
-Firebase (rooms / players / hands docs)
-        │ snapshots
+Immutable Game State (GameState interface with readonly)
+        │
         ▼
-RxJS Observables (roomObservable / playersObservable / myHandObservable)
-        │ next/error
+Pure Functions (createInitialState, playCard, drawCards)
+        │ returns new state
         ▼
-Redux store (gameSlice reducers update unified state)
-        │ selector wrapper (Vue bridge)
+Lodash Operations (_.map, _.concat, _.take, _.drop, _.shuffle)
+        │ immutable transformations
         ▼
-OnlineBoard.vue (UI reads store via useSelector)
-        │ user actions
+Higher-Order Functions (compose, pipe, curry, closures)
+        │ function composition
         ▼
-GraphQL mutations (playCardOnline / drawOneOnline / endTurnOnline)
+New Game State (no mutations, always new objects)
 ```
 
 ## Key Files
-- `src/store/types.ts` – Shared state types.
-- `src/store/gameSlice.ts` – Redux slice for UNO state.
-- `src/store/store.ts` – Configured Redux store.
-- `src/store/streams.ts` – RxJS Observables wrapping Firestore snapshots.
-- `src/store/vue.ts` – Lightweight Vue hooks (`useSelector`, `useDispatch`) bridging to Redux.
-- `src/services/OnlineBoard.vue` – Refactored to rely on Redux + RxJS instead of direct Firestore subscription.
-- `src/services/OnlineGame.ts` – GraphQL mutation helpers.
+- `src/online/Round.ts` (517 lines) – Pure functional game state management with immutable types
+- `src/online/Hand.ts` (87 lines) – Pure hand manipulation functions using lodash
+- `src/online/Deck.ts` (78 lines) – Pure deck operations with lodash.shuffle
+- `src/online/functional-utils.ts` (236 lines) – Higher-order functions (compose, pipe, curry, closures)
+- `src/cards/Card.ts` – Immutable card type definitions
+- `src/cards/Rules.ts` – Pure card matching logic
 
 ## How to Run
 
@@ -55,28 +58,68 @@ npm run build
 npm run deploy   # publishes dist/ to gh-pages branch
 ```
 
-## Adding React (Next Step)
-1. Install React dependencies:
-   ```powershell
-   npm install react react-dom @types/react @types/react-dom
-   ```
-2. Create `src/react/App.tsx` that uses the same selectors (wrap store with `<Provider>` using `react-redux`).
-3. Add a React entry point (`react-main.tsx`) alongside current Vue entry, or switch entirely.
-4. Gradually port Vue components.
+## Functional Programming Highlights
 
-## Functional Model Notes
-Current functional server/game model (top card logic, wild color handling, draw stacking, number chaining) remains intact through existing services and `matches` rule. Refactor opportunities: extract pure functions (e.g., `canPlay`, `resolveStack`) into a `model/` directory for reuse in React version.
+### Immutability
+All game state types use `readonly` modifiers:
+```typescript
+export interface GameState {
+  readonly deck: readonly Card[];
+  readonly discard: readonly Card[];
+  readonly players: readonly PlayerState[];
+  // ...
+}
+```
+
+### Pure Functions with Lodash
+```typescript
+// Using lodash for immutable array operations
+export const addCard = (hand: readonly Card[], card: Card): readonly Card[] => {
+  return _.concat(hand, card); // No mutations
+};
+
+export const removeCardAt = (hand: readonly Card[], index: number) => {
+  const newHand = _.concat(
+    _.take(hand, index),
+    _.drop(hand, index + 1)
+  );
+  return { newHand, removedCard: hand[index] };
+};
+```
+
+### Higher-Order Functions
+Demonstrated in `functional-utils.ts`:
+- **compose**: Right-to-left function composition
+- **pipe**: Left-to-right function composition
+- **curry**: Transform multi-arg functions to curried form
+- **Closures**: Private state without classes
+
+### State Transformations
+All game operations return new state:
+```typescript
+export const playCard = (state: GameState, playerId: string, cardIndex: number): GameState => {
+  // Returns entirely new GameState object
+  return {
+    ...state,
+    deck: newDeck,
+    discard: _.concat(state.discard, card),
+    players: updatedPlayers, // mapped with lodash
+    // ...
+  };
+};
+```
 
 ## Verification
-- Build succeeded (`npm run build`).
-- New bundle hash appears each deploy due to injected `__BUILD_TIME__`.
-- Gameplay interactions still work via Redux + RxJS pipeline (draw, play, stack).
+- ✅ All functions are pure (no side effects)
+- ✅ All data structures are immutable (readonly types)
+- ✅ Lodash used for array operations
+- ✅ Higher-order functions demonstrated
+- ✅ No classes, no mutations, functional style throughout
 
 ## Future Enhancements
-- Full React UI.
-- Unit tests for pure card/stacking logic.
-- Better chunk splitting (current JS bundle ~700kB).
-- Error boundary component for network failures.
+- Add UNO calling function (should-have)
+- Unit tests for pure functions (could-have)
+- Property-based testing with fast-check
 
 ## License
 Internal coursework project – no production use implied.

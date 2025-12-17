@@ -2,6 +2,7 @@ import type { Card, Color } from "../cards/Card";
 import { matches } from "../cards/Rules";
 import { createStandardDeck, drawFromDeck, refillDeck, shuffle } from "./Deck";
 import { addCard, removeCardAt, getCardAt, getHandSize, findPlayableIndex, isHandEmpty } from "./Hand";
+import _ from "lodash";
 
 // Functional Programming: Immutable game state with pure functions
 // No classes, no mutations - all operations return new state
@@ -142,11 +143,11 @@ export const getPlayerHand = (state: GameState, playerId: string): readonly Card
 
 /**
  * Pure function to create snapshot
- * Uses map to transform data
+ * Uses lodash.map to transform data
  */
 export const createSnapshot = (state: GameState): RoundSnapshot => {
   return {
-    players: state.players.map(p => ({ id: p.id, handCount: p.hand.length })),
+    players: _.map(state.players, p => ({ id: p.id, handCount: p.hand.length })),
     topCard: getTopCard(state),
     currentPlayer: getCurrentPlayer(state).id,
     direction: state.direction,
@@ -186,10 +187,10 @@ const drawWithReshuffle = (
     return { newDeck, newDiscard: discard, drawnCards };
   }
 
-  // Need more cards - reshuffle discard pile
+  // Need more cards - reshuffle discard pile using lodash
   const need = count - drawnCards.length;
-  const keepTop = discard[discard.length - 1];
-  const cardsToReshuffle = discard.slice(0, Math.max(0, discard.length - 1));
+  const keepTop = _.last(discard)!;
+  const cardsToReshuffle = _.initial(discard);
   
   if (cardsToReshuffle.length === 0) {
     // Nothing to reshuffle
@@ -224,10 +225,10 @@ export const drawCards = (
   
   const { newDeck, newDiscard, drawnCards } = drawWithReshuffle(state.deck, state.discard, amount);
   
-  // Add cards to player's hand immutably
-  const updatedPlayers = state.players.map(p =>
+  // Add cards to player's hand immutably using lodash
+  const updatedPlayers = _.map(state.players, p =>
     p.id === playerId
-      ? { ...p, hand: [...p.hand, ...drawnCards] }
+      ? { ...p, hand: _.concat(p.hand, drawnCards) }
       : p
   );
 
@@ -253,7 +254,7 @@ export const drawCards = (
       pendingTargetId: null,
       chainPlayerId: null,
       chainValue: null,
-      history: [...state.history, historyEntry]
+      history: _.concat(state.history, historyEntry)
     };
   } else {
     // Normal draw
@@ -268,7 +269,7 @@ export const drawCards = (
       deck: newDeck,
       discard: newDiscard,
       players: updatedPlayers,
-      history: [...state.history, historyEntry]
+      history: _.concat(state.history, historyEntry)
     };
   }
 
@@ -329,7 +330,7 @@ export const playCard = (
   const { newHand, removedCard } = removeCardAt(player.hand, handIndex);
   if (!removedCard) throw new Error("Failed to remove card");
 
-  const updatedPlayers = state.players.map(p =>
+  const updatedPlayers = _.map(state.players, p =>
     p.id === playerId ? { ...p, hand: newHand } : p
   );
 
@@ -373,12 +374,12 @@ export const playCard = (
   let newState: GameState = {
     ...state,
     players: updatedPlayers,
-    discard: [...state.discard, cardToDiscard],
+    discard: _.concat(state.discard, cardToDiscard),
     pendingDraw: newPendingDraw,
     pendingType: newPendingType,
     chosenColor: newChosenColor,
     direction: newDirection,
-    history: [...state.history, { kind: "play", playerId, card: removedCard, chosenColor }]
+    history: _.concat(state.history, { kind: "play", playerId, card: removedCard, chosenColor })
   };
 
   // Check win condition
@@ -448,7 +449,7 @@ export const endTurn = (state: GameState, playerId: string): GameState => {
     currentIndex: advanceIndex(state),
     chainPlayerId: null,
     chainValue: null,
-    history: [...state.history, { kind: "endTurn", playerId }]
+    history: _.concat(state.history, { kind: "endTurn", playerId })
   };
 };
 
