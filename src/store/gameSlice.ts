@@ -23,14 +23,9 @@ const gameSlice = createSlice({
     },
     setMyHand(state, action: PayloadAction<Card[]>) {
       state.myHand = action.payload;
-    },
-    resetGame(state) {
-      state.room = null;
-      state.players = [];
-      state.myHand = [];
     }
   }
 });
 
-export const { setRoom, setPlayers, setMyHand, resetGame } = gameSlice.actions;
+export const { setRoom, setPlayers, setMyHand } = gameSlice.actions;
 export default gameSlice.reducer;
