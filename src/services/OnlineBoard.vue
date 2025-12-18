@@ -116,10 +116,10 @@
           </button>
 
           <button
-            v-if="((chainingActive && youHavePlayable) || (hasDrawnThisTurn && !youHavePlayable)) && !pendingDrawInfo"
+            v-if="(chainingActive || (hasDrawnThisTurn && !youHavePlayable)) && !pendingDrawInfo"
             @click="onEndTurn"
             style="padding: .5rem 1rem; background: #f59e0b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;"
-            :title="chainingActive ? 'End number chain (you have more matches)' : 'End your turn (no playable cards)'"
+            :title="chainingActive ? 'End number chain' : 'End your turn (no playable cards)'"
           >
             End Turn
           </button>
