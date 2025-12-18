@@ -61,20 +61,6 @@ export const findPlayableIndex = (
 };
 
 /**
- * Pure function to filter playable cards
- * Returns array of {card, index} for all playable cards
- * Demonstrates map + filter composition
- */
-export const getPlayableCards = (
-  hand: readonly Card[],
-  predicate: (card: Card) => boolean
-): readonly { card: Card; index: number }[] => {
-  return hand
-    .map((card, index) => ({ card, index }))
-    .filter(({ card }) => predicate(card));
-};
-
-/**
  * Pure function to get hand size
  */
 export const getHandSize = (hand: readonly Card[]): number => {
