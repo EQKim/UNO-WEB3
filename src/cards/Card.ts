@@ -24,4 +24,3 @@ export type WildCard = {
 }
 
 export type Card = NumberCard | ActionCard | WildCard
-export type TypedCard<K extends Card["kind"]> = Extract<Card, { kind: K }>
