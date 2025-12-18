@@ -11,13 +11,7 @@ export const addCard = (hand: readonly Card[], card: Card): readonly Card[] => {
   return [...hand, card];
 };
 
-/**
- * Pure function to add multiple cards to a hand
- * Uses reduce to demonstrate higher-order functions
- */
-export const addCards = (hand: readonly Card[], cards: readonly Card[]): readonly Card[] => {
-  return cards.reduce((acc, card) => addCard(acc, card), hand);
-};
+
 
 /**
  * Pure function to remove a card at a specific index
@@ -54,19 +48,7 @@ export const findPlayableIndex = (
   return hand.findIndex(predicate);
 };
 
-/**
- * Pure function to filter playable cards
- * Returns array of {card, index} for all playable cards
- * Demonstrates map + filter composition
- */
-export const getPlayableCards = (
-  hand: readonly Card[],
-  predicate: (card: Card) => boolean
-): readonly { card: Card; index: number }[] => {
-  return hand
-    .map((card, index) => ({ card, index }))
-    .filter(({ card }) => predicate(card));
-};
+
 
 /**
  * Pure function to get hand size

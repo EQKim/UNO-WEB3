@@ -49,74 +49,6 @@ export interface RoundSnapshot {
 }
 
 /**
- * Pure function to create initial game state
- * Uses higher-order functions and immutability
- */
-export const createInitialState = (
-  playerIds: readonly string[],
-  dealCount: number = 7
-): GameState => {
-  if (playerIds.length < 2) throw new Error("Need at least 2 players");
-
-  let deck = createStandardDeck();
-  
-  // Deal cards to players using reduce (demonstrates higher-order function)
-  const { players, remainingDeck } = playerIds.reduce(
-    (acc, id) => {
-      let playerDeck = acc.remainingDeck;
-      const hand: Card[] = [];
-      
-      // Deal cards to this player
-      for (let i = 0; i < dealCount; i++) {
-        const { drawnCards, newDeck } = drawFromDeck(playerDeck, 1);
-        if (drawnCards.length > 0) {
-          hand.push(drawnCards[0]);
-          playerDeck = newDeck;
-        }
-      }
-      
-      return {
-        players: [...acc.players, { id, hand }],
-        remainingDeck: playerDeck
-      };
-    },
-    { players: [] as PlayerState[], remainingDeck: deck }
-  );
-
-  // Draw initial top card (cannot be wild)
-  let topCard: Card;
-  let finalDeck = remainingDeck;
-  
-  do {
-    const { drawnCards, newDeck } = drawFromDeck(finalDeck, 1);
-    if (drawnCards.length === 0) throw new Error("Deck empty");
-    topCard = drawnCards[0];
-    
-    if (topCard.kind === "wild") {
-      // Put wild back and reshuffle
-      finalDeck = shuffle([...newDeck, topCard]);
-    } else {
-      finalDeck = newDeck;
-    }
-  } while (topCard.kind === "wild");
-
-  return {
-    deck: finalDeck,
-    discard: [topCard],
-    players,
-    currentIndex: 0,
-    direction: 1,
-    pendingDraw: 0,
-    pendingType: null,
-    chosenColor: null,
-    chainPlayerId: null,
-    chainValue: null,
-    pendingTargetId: null,
-    history: []
-  };
-};
-
-/**
  * Pure function to get current player
  * Demonstrates function composition
  */
@@ -129,36 +61,6 @@ export const getCurrentPlayer = (state: GameState): PlayerState => {
  */
 export const getTopCard = (state: GameState): Card => {
   return state.discard[state.discard.length - 1];
-};
-
-/**
- * Pure function to get player hand
- * Uses filter to find player
- */
-export const getPlayerHand = (state: GameState, playerId: string): readonly Card[] => {
-  const player = state.players.find(p => p.id === playerId);
-  return player ? player.hand : [];
-};
-
-/**
- * Pure function to create snapshot
- * Uses map to transform data
- */
-export const createSnapshot = (state: GameState): RoundSnapshot => {
-  return {
-    players: state.players.map(p => ({ id: p.id, handCount: p.hand.length })),
-    topCard: getTopCard(state),
-    currentPlayer: getCurrentPlayer(state).id,
-    direction: state.direction,
-    winner: state.winner,
-    pendingDraw: state.pendingDraw || undefined,
-    pendingType: state.pendingType,
-    chosenColor: state.chosenColor,
-    chainPlayerId: state.chainPlayerId,
-    chainValue: state.chainValue,
-    pendingTargetId: state.pendingTargetId,
-    history: state.history
-  };
 };
 
 /**
@@ -452,65 +354,4 @@ export const endTurn = (state: GameState, playerId: string): GameState => {
   };
 };
 
-/**
- * Pure function to draw and maybe auto-play
- * Demonstrates complex function composition
- */
-export const drawAndMaybePlay = (
-  state: GameState,
-  playerId: string
-): { newState: GameState; drawn: readonly Card[]; played: boolean } => {
-  const prePending = state.pendingDraw;
-  const stateAfterDraw = drawCards(state, playerId, undefined);
-  
-  const drawnCards = stateAfterDraw.history
-    .slice(-1)[0]?.kind === "draw" || stateAfterDraw.history.slice(-1)[0]?.kind === "penaltyDraw"
-    ? (stateAfterDraw.history.slice(-1)[0] as any).amount
-    : 0;
 
-  if (prePending > 0) {
-    return { newState: stateAfterDraw, drawn: [], played: false };
-  }
-
-  // Find playable card using higher-order function
-  const currentPlayer = getCurrentPlayer(stateAfterDraw);
-  const topCard = getTopCard(stateAfterDraw);
-  
-  const playableIndex = findPlayableIndex(currentPlayer.hand, (c: Card) => {
-    if (stateAfterDraw.chainPlayerId === playerId) {
-      return c.kind === "number" && stateAfterDraw.chainValue != null && c.value === stateAfterDraw.chainValue;
-    }
-    return matches(topCard, c);
-  });
-
-  if (playableIndex >= 0) {
-    const card = getCardAt(currentPlayer.hand, playableIndex)!;
-    
-    if (card.kind === "wild") {
-      // Choose color heuristically using reduce
-      const counts = currentPlayer.hand
-        .filter((c): c is Exclude<Card, { kind: "wild" }> => c.kind !== "wild")
-        .reduce((acc, c) => {
-          acc[c.color] = (acc[c.color] || 0) + 1;
-          return acc;
-        }, {} as Record<Color, number>);
-
-      const chosen = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] as Color) || "red";
-      const finalState = playCard(stateAfterDraw, playerId, playableIndex, chosen);
-      return { newState: finalState, drawn: [], played: true };
-    } else {
-      const finalState = playCard(stateAfterDraw, playerId, playableIndex);
-      return { newState: finalState, drawn: [], played: true };
-    }
-  }
-
-  // Cannot play - advance turn
-  const finalState = {
-    ...stateAfterDraw,
-    currentIndex: advanceIndex(stateAfterDraw),
-    chainPlayerId: null,
-    chainValue: null
-  };
-
-  return { newState: finalState, drawn: [], played: false };
-};

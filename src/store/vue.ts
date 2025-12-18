@@ -34,20 +34,4 @@ export function useSelector<T>(
   return computed(() => state.value);
 }
 
-/**
- * Get Redux dispatch function
- * Similar to useDispatch from react-redux
- */
-export function useDispatch() {
-  return store.dispatch;
-}
 
-/**
- * Subscribe to Redux store changes and trigger Vue reactivity
- * Call this in onMounted to ensure Vue components react to Redux updates
- */
-export function useStoreSubscription(callback?: () => void): () => void {
-  return store.subscribe(() => {
-    callback?.();
-  });
-}
