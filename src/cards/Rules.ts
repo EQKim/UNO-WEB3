@@ -27,10 +27,3 @@ export function matches(top: Card, c: Card): boolean {
   // Mixed kinds (number vs action): match by color
   return c.color === top.color;
 }
-
-
-// Very basic AI: play first valid, else "draw"
-export function chooseForAI(hand: Card[], top: Card): Card | "draw" {
-  const playable = hand.find(c => matches(top, c));
-  return playable ?? "draw";
-}

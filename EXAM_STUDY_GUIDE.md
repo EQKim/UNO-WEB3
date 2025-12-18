@@ -4,60 +4,72 @@ This comprehensive guide covers **Assignment 4** (Functional Programming) and **
 
 ---
 
+## ⚠️ IMPORTANT NOTE
+
+**The code examples referencing `Round.ts`, `Hand.ts`, `Deck.ts`, and `functional-utils.ts` in this study guide are for educational purposes only.** These files have been removed from the actual project as they were not being used in the implementation. The current project uses:
+- **GraphQL mutations** for game logic (handled server-side)
+- **Firebase + RxJS** for real-time state synchronization
+- **Redux** for client-side state management
+- **`matches()` function** from `Rules.ts` for card validation
+
+However, the concepts demonstrated in these examples (immutability, pure functions, higher-order functions, closures, function composition) are essential for understanding functional programming and are valuable for exam preparation.
+
+---
+
 ## 📋 Assignment 5 Overview
 
-**⚠️ Important Implementation Note:**
+**Implementation:** React + Redux + RxJS
 
-Since we're using **Vue** instead of React, we need to bridge Vue's reactivity system with Redux. The key challenge is that Vue's `computed()` doesn't automatically re-run when Redux state changes (unlike React's hooks).
+This project uses:
+- **React** for component rendering (Next.js framework)
+- **Redux Toolkit** for state management
+- **RxJS** for handling real-time Firestore updates
 
-**Solution: Subscribe to Redux Store Changes**
+**Architecture Flow:**
+1. Firestore emits snapshot → RxJS Observable
+2. Observable transforms data → Redux actions dispatched
+3. Redux state updates → React components re-render
 
-In `src/store/vue.ts`, our `useSelector` hook:
-1. Creates a reactive Vue `ref`
-2. Subscribes to Redux store with `store.subscribe()`
-3. Updates the ref when Redux state changes
-4. Automatically unsubscribes on component unmount
+**Key Integration:** `src/store/streams.ts` bridges RxJS and Redux:
 
 ```typescript
-export function useSelector<T>(selector: (state: RootState) => T): ComputedRef<T> {
-  const state = ref(selector(store.getState())) as Ref<T>;
-  
-  // ✅ Subscribe to Redux - update Vue ref when state changes
-  const unsubscribe = store.subscribe(() => {
-    state.value = selector(store.getState());
+export function startListeningToRoom(roomId: string) {
+  // RxJS Observable from Firestore
+  const subscription = listenRoomRx(roomId).subscribe({
+    next: ({ room, players, myHand }) => {
+      // Dispatch Redux actions
+      store.dispatch(setRoom(room));
+      store.dispatch(setPlayers(players));
+      store.dispatch(setMyHand(myHand));
+    }
   });
   
-  // ✅ Cleanup on component unmount
-  if (typeof onUnmounted !== 'undefined') {
-    onUnmounted(() => unsubscribe());
-  }
-  
-  return computed(() => state.value);
+  return () => subscription.unsubscribe();
 }
 ```
 
 **Why this works:**
 - RxJS Observable emits → Redux action dispatched → Redux state updates
-- `store.subscribe()` callback fires → Vue ref updates
-- Vue reactivity detects ref change → Component re-renders
+- React components use `useAppSelector` hook to read Redux state
+- Components automatically re-render when Redux state changes
 
 ---
 
 ## 📋 Assignment 5 Requirements
 
 **Conversion to Other Technologies:**
-- Convert Vue/Pinia client to React/Redux using RxJS
-- Use functional model from Assignment 4
-- Retain all features from Assignments 1-3
+- ✅ React/Redux client with RxJS
+- ✅ Functional programming concepts from Assignment 4
+- ✅ Retain all features from Assignments 1-3
 
 **Must Have Requirements:**
-1. ✅ Functional model from Assignment 4
+1. ✅ Functional model from Assignment 4 (concepts demonstrated)
 2. ✅ Redux for state management
 3. ✅ RxJS for handling messages from the server
 4. ✅ Retain features from assignments 1-3
 
 **Should Have:**
-- React for rendering (optional - we use Vue + Redux bridge)
+- ✅ React for rendering (Next.js)
 
 ---
 
